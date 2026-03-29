@@ -1,0 +1,23 @@
+@page
+@{ Layout = "_Layout"; ViewData["Title"] = "Booking"; }
+<h1>Book a Room</h1>
+<div id="bookingContainer" style="max-width:640px">
+  <form onsubmit="return false;" style="display:grid;gap:8px">
+    <label>Room
+      <select id="spaceSelect"></select>
+    </label>
+    <label>Date
+      <input type="date" id="dateInput" />
+    </label>
+    <label>Start hour (0-23)
+      <input id="startInput" type="number" min="0" max="23" />
+    </label>
+    <label>Hours
+      <input id="hoursInput" type="number" min="1" max="12" />
+    </label>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button id="bookBtn">Book</button>
+      <div id="bookingMsg" class="muted"></div>
+    </div>
+  </form>
+</div>

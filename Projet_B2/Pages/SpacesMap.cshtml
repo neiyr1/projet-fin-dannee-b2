@@ -1,0 +1,28 @@
+@page
+@{ Layout = "_Layout"; ViewData["Title"] = "Spaces Map"; }
+<h1>Spaces Map</h1>
+<div class="map-toolbar">
+  <div style="display:flex;gap:8px;align-items:center">
+    <input id="search" placeholder="Search spaces" style="padding:8px;border-radius:8px;border:1px solid #e6e9ef" />
+    <button id="refresh">Refresh</button>
+  </div>
+  <div id="count" class="muted"></div>
+</div>
+
+<div class="map-grid">
+  <aside class="sidebar">
+    <h3 class="muted">Spaces</h3>
+    <ul id="spaceList" class="space-list"></ul>
+  </aside>
+
+  <section class="map-area">
+    <div id="mapContainer" class="map-container" aria-label="Co-working spaces map"></div>
+    <div id="detailPanel" class="detail-panel muted">Hover a space to see details</div>
+  </section>
+</div>
+
+<div class="legend">
+  <div class="item"><span class="swatch free"></span> <span class="muted">Available</span></div>
+  <div class="item"><span class="swatch occ"></span> <span class="muted">Occupied</span></div>
+</div>
+<p class="muted"><a href="/Spaces">Back to list</a></p>

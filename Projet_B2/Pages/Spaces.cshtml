@@ -1,0 +1,12 @@
+@page
+@{ Layout = "_Layout"; ViewData["Title"] = "Spaces"; }
+<h1>Co-working Spaces</h1>
+<div style="margin-bottom:12px">
+  <form id="addForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <input name="name" placeholder="Name" required style="flex:1;min-width:160px">
+    <input name="capacity" type="number" placeholder="Capacity" required style="width:120px">
+    <button type="submit">Add</button>
+  </form>
+</div>
+<ul id="list"></ul>
+<p class="muted"> <a href="#" id="logout">Sign out</a> &nbsp;|&nbsp; <a href="/SpacesMap">Visual map</a></p>
