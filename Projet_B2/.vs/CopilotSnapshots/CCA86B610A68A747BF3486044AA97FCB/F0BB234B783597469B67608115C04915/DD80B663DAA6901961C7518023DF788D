@@ -1,0 +1,28 @@
+﻿@page
+@{ Layout = "_Layout"; ViewData["Title"] = "Rooms"; }
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h4 mb-0">Rooms</h1>
+  <div><a class="btn btn-outline-secondary btn-sm" href="/SpacesMap">Back to map</a></div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <form id="addRoomForm" class="row g-2 align-items-center">
+      <div class="col-sm">
+        <input name="name" placeholder="Name" required class="form-control" />
+      </div>
+      <div class="col-auto">
+        <input name="capacity" type="number" placeholder="Capacity" required class="form-control" style="width:120px" />
+      </div>
+      <div class="col-auto">
+        <input name="location" placeholder="Location" class="form-control" style="width:160px" />
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-primary">Add Room</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<ul id="roomsList" class="list-group"></ul>
+<script src="/js/rooms.js" defer></script>

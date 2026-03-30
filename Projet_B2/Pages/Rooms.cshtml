@@ -1,14 +1,31 @@
 @page
 @{ Layout = "_Layout"; ViewData["Title"] = "Rooms"; }
-<h1>Rooms</h1>
-<div style="margin-bottom:12px">
-  <form id="addRoomForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-    <input name="name" placeholder="Name" required style="flex:1;min-width:160px">
-    <input name="capacity" type="number" placeholder="Capacity" required style="width:120px">
-    <input name="location" placeholder="Location" style="width:160px">
-    <button type="submit">Add Room</button>
-  </form>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="d-flex align-items-center gap-3">
+    <img src="~/images/Logo_1_mini.svg" asp-append-version="true" alt="Logo" style="height:36px" />
+    <h1 class="h4 mb-0">Rooms</h1>
+  </div>
+  <div><a class="btn btn-outline-secondary btn-sm" href="/SpacesMap">Back to map</a></div>
 </div>
-<ul id="roomsList"></ul>
-<p class="muted"> <a href="/SpacesMap">Back to map</a></p>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <form id="addRoomForm" class="row g-2 align-items-center">
+      <div class="col-sm">
+        <input name="name" placeholder="Name" required class="form-control" />
+      </div>
+      <div class="col-auto">
+        <input name="capacity" type="number" placeholder="Capacity" required class="form-control" style="width:120px" />
+      </div>
+      <div class="col-auto">
+        <input name="location" placeholder="Location" class="form-control" style="width:160px" />
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-primary">Add Room</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<ul id="roomsList" class="list-group"></ul>
 <script src="/js/rooms.js" defer></script>

@@ -1,0 +1,59 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>@ViewData["Title"] - CoWork Manager</title>
+  <!-- Bootstrap CSS (CDN). If your environment blocks CDN, use a local copy in wwwroot/lib/bootstrap -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="stylesheet" href="/css/map.css" />
+  <style>
+    /* small tweaks to blend existing styles with Bootstrap */
+    .brand-logo { height:28px; }
+  </style>
+</head>
+<body class="bg-light">
+  <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm">
+    <div class="container">
+      <a class="navbar-brand d-flex align-items-center" href="/">
+        <img src="/images/Logo_1_mini.svg" asp-append-version="true" alt="Logo" class="me-2 brand-logo" />
+        <img src="/images/Logo_1_mini.svg" asp-append-version="true" alt="Logo" class="me-2 brand-logo" onerror="this.onerror=null;this.src='/images/Logo_1_mini.png?'+Date.now();" />
+        <div class="d-none d-sm-block">
+          <div style="font-weight:700;line-height:1">CoWork Manager</div>
+          <div class="text-muted" style="font-size:12px;line-height:1">Manage your spaces</div>
+        </div>
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+
+      <div class="collapse navbar-collapse" id="mainNav">
+        <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+          <li class="nav-item"><a class="nav-link" href="/">Home</a></li>
+          <li class="nav-item"><a class="nav-link" href="/Spaces">Spaces</a></li>
+          <li class="nav-item"><a class="nav-link" href="/Rooms">Rooms</a></li>
+          <li class="nav-item"><a class="nav-link" href="/SpacesMap">Map</a></li>
+        </ul>
+        <div class="d-flex align-items-center" id="userArea">
+          <a id="loginLink" class="btn btn-outline-primary btn-sm me-2" href="/Login">Sign in</a>
+          <a id="logout" class="btn btn-outline-secondary btn-sm me-2" href="#" style="display:none">Sign out</a>
+          <span id="username" class="badge bg-primary text-white" style="display:none"></span>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container my-4">
+    <main>
+      @RenderBody()
+    </main>
+  </div>
+
+  <!-- Bootstrap bundle (includes Popper) -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" defer></script>
+  <script src="/js/app.js" defer></script>
+  <script src="/js/map.js" defer></script>
+  <script src="/js/booking.js" defer></script>
+</body>
+</html>

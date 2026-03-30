@@ -1,23 +1,28 @@
 @page
 @{ Layout = "_Layout"; ViewData["Title"] = "Login"; }
-<div class="card">
-  <div class="brand">
-    <div class="logo"><img src="../wwwroot/images/Logo_1_mini.svg" alt="CoWork Manager"></div>
-    <div>
-      <div style="font-weight:700;">CoWork Manager</div>
-      <div class="muted" style="font-size:13px;">Manage spaces and bookings</div>
+<div class="d-flex justify-content-center align-items-center" style="min-height:60vh">
+  <div class="card shadow-sm" style="max-width:420px;width:100%">
+    <div class="card-body">
+      <div class="text-center mb-3">
+        <img src="~/images/Logo_1_mini.svg" asp-append-version="true" alt="CoWork Manager" style="height:40px" class="mb-2" />
+        <h5 class="card-title mt-2">Sign in</h5>
+        <div class="text-muted small">Manage spaces and bookings</div>
+      </div>
+
+      <form id="loginForm">
+        <div class="mb-2">
+          <label class="form-label">Username</label>
+          <input name="username" class="form-control" required autocomplete="username" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Password</label>
+          <input name="password" type="password" class="form-control" required autocomplete="current-password" />
+        </div>
+        <div class="d-flex justify-content-between align-items-center">
+          <div id="msg" class="text-danger small"></div>
+          <button type="submit" class="btn btn-primary">Sign in</button>
+        </div>
+      </form>
     </div>
   </div>
-
-  <form id="loginForm">
-    <label>Username
-      <input name="username" required autocomplete="username">
-    </label>
-    <label>Password
-      <input name="password" type="password" required autocomplete="current-password">
-    </label>
-    <button type="submit">Sign in</button>
-  </form>
-
-  <p id="msg" class="muted center" style="margin-top:12px"></p>
 </div>

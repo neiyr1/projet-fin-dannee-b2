@@ -21,8 +21,14 @@ var options = new WebApplicationOptions
 
 var builder = WebApplication.CreateBuilder(options);
 
-// Add Razor Pages
-builder.Services.AddRazorPages();
+// Add Razor Pages and require authentication for all pages by default
+builder.Services.AddRazorPages(options =>
+{
+	// Protect all pages by default
+	options.Conventions.AuthorizeFolder("/");
+	// Allow anonymous access to the login page so unauthenticated users can sign in
+	options.Conventions.AllowAnonymousToPage("/Login");
+});
 
 // Configure Kestrel to listen on HTTPS localhost:5001 using the development certificate
 builder.WebHost.ConfigureKestrel(serverOptions =>
@@ -43,20 +49,13 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 	});
 builder.Services.AddAuthorization();
 
-// In-memory users (kept for quick login) — main data stored in SQLite
-var users = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-{
-	["admin"] = "password"
-};
+// All users are stored in SQLite (no in-memory fallback)
 
 // Helper: compute DB path (data/app.db next to project root)
 // Use DbHelpers for DB path
 string GetDbPath() => DbHelpers.GetDbPath(websitePath);
 
 var app = builder.Build();
-
-app.UseAuthentication();
-app.UseAuthorization();
 
 // Serve `login.html` as the default document when visiting the site root
 var defaultFilesOptions = new DefaultFilesOptions();
@@ -65,8 +64,33 @@ defaultFilesOptions.DefaultFileNames.Add("login.html");
 app.UseDefaultFiles(defaultFilesOptions);
 app.UseStaticFiles();
 
+app.UseAuthentication();
+app.UseAuthorization();
+
 // Map Razor Pages (Pages/*.cshtml)
 app.MapRazorPages();
+
+// Diagnostic endpoint to check static files availability
+app.MapGet("/diag/static", (HttpContext http) =>
+{
+	var filesToCheck = new[] { "/images/Logo_1_mini.svg", "/css/styles.css", "/js/app.js" };
+	var result = new Dictionary<string, object>();
+	foreach (var url in filesToCheck)
+	{
+		try
+		{
+			var rel = url.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+			var phys = Path.Combine(websitePath, rel);
+			var exists = File.Exists(phys);
+			result[url] = new { exists, physicalPath = phys };
+		}
+		catch (Exception ex)
+		{
+			result[url] = new { exists = false, error = ex.Message };
+		}
+	}
+	return Results.Ok(result);
+});
 
 // legacy `website` folder no longer served; assets copied into wwwroot
 
@@ -105,16 +129,8 @@ app.MapPost("/api/login", async (HttpContext http) =>
 	}
 
 	catch { /* ignore DB errors and fallback */ }
-
-	// Fallback to in-memory users for legacy testing
-	if (!users.TryGetValue(username, out var pw) || pw != password)
-		return Results.Unauthorized();
-
-	var fbClaims = new[] { new Claim(ClaimTypes.Name, username), new Claim(ClaimTypes.Role, "Admin") };
-	var fbIdentity = new ClaimsIdentity(fbClaims, CookieAuthenticationDefaults.AuthenticationScheme);
-	var fbPrincipal = new ClaimsPrincipal(fbIdentity);
-	await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, fbPrincipal);
-	return Results.Ok(new { user = username });
+	// If DB auth failed, do not fallback to in-memory users — require valid DB credentials
+	return Results.Unauthorized();
 });
 
 app.MapPost("/api/logout", async (HttpContext http) =>
@@ -255,18 +271,64 @@ DbHelpers.SeedDefaultSpaces(dbPath);
 // Seed default rooms (separate Rooms table)
 DbHelpers.SeedDefaultRooms(dbPath);
 
+// Diagnostic endpoint to inspect the SQLite database
+app.MapGet("/diag/db", () =>
+{
+	var db = GetDbPath();
+	var result = new Dictionary<string, object> { ["dbPath"] = db, ["exists"] = File.Exists(db) };
+	if (!File.Exists(db)) return Results.Ok(result);
+	try
+	{
+		using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = db }.ConnectionString);
+		conn.Open();
+		using var cmd = conn.CreateCommand();
+
+		cmd.CommandText = "SELECT COUNT(1) FROM Users";
+		result["users"] = Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
+
+		cmd.CommandText = "SELECT COUNT(1) FROM Spaces";
+		result["spaces"] = Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
+
+		cmd.CommandText = "SELECT COUNT(1) FROM Rooms";
+		result["rooms"] = Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
+
+		cmd.CommandText = "SELECT COUNT(1) FROM Reservation";
+		result["reservations"] = Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
+
+		conn.Close();
+	}
+	catch (Exception ex)
+	{
+		result["error"] = ex.Message;
+	}
+	return Results.Ok(result);
+});
+
 // Create reservation endpoint
 app.MapPost("/api/reservations", async (HttpContext http) =>
 {
 	if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
-	var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, object>>(http.Request.Body);
-	if (body == null) return Results.BadRequest(new { error = "Invalid payload" });
+    System.Text.Json.JsonElement root;
+	try
+	{
+		root = await System.Text.Json.JsonSerializer.DeserializeAsync<System.Text.Json.JsonElement>(http.Request.Body);
+	}
+	catch
+	{
+		return Results.BadRequest(new { error = "Invalid payload" });
+	}
+	if (root.ValueKind == System.Text.Json.JsonValueKind.Undefined || root.ValueKind == System.Text.Json.JsonValueKind.Null)
+		return Results.BadRequest(new { error = "Invalid payload" });
 
-	int ownerId = body.TryGetValue("ownerId", out var o) ? Convert.ToInt32(o) : 0;
-	int spaceId = body.TryGetValue("spaceId", out var sp) ? Convert.ToInt32(sp) : 0;
-	var dateStr = body.TryGetValue("date", out var d) ? d?.ToString() ?? DateTime.UtcNow.ToString("yyyy-MM-dd") : DateTime.UtcNow.ToString("yyyy-MM-dd");
-	int startHour = body.TryGetValue("startHour", out var sh) ? Convert.ToInt32(sh) : 0;
-	int hours = body.TryGetValue("hours", out var h) ? Convert.ToInt32(h) : 1;
+	// read payload fields safely from JsonElement
+	int spaceId = 0;
+	if (root.TryGetProperty("spaceId", out var spEl) && spEl.ValueKind == System.Text.Json.JsonValueKind.Number) spaceId = spEl.GetInt32();
+	var dateStr = DateTime.UtcNow.ToString("yyyy-MM-dd");
+	if (root.TryGetProperty("date", out var dEl) && dEl.ValueKind == System.Text.Json.JsonValueKind.String) dateStr = dEl.GetString() ?? dateStr;
+	int startHour = 0;
+	if (root.TryGetProperty("startHour", out var shEl) && shEl.ValueKind == System.Text.Json.JsonValueKind.Number) startHour = shEl.GetInt32();
+	int hours = 1;
+	if (root.TryGetProperty("hours", out var hEl) && hEl.ValueKind == System.Text.Json.JsonValueKind.Number) hours = hEl.GetInt32();
 
 	var date = DateTime.Parse(dateStr).Date;
 	if (startHour < 0 || startHour > 23) return Results.BadRequest(new { error = "startHour must be 0-23" });
@@ -275,6 +337,28 @@ app.MapPost("/api/reservations", async (HttpContext http) =>
 
 	using var conn2 = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = GetDbPath() }.ConnectionString);
 	conn2.Open();
+
+	// Resolve current user to DB OwnerId (ignore payload ownerId for security)
+	var currentName = http.User?.Identity?.Name ?? string.Empty;
+	int ownerId = 0;
+	using (var ucmd = conn2.CreateCommand())
+	{
+		ucmd.CommandText = "SELECT Id FROM Users WHERE Name = $n OR Email = $n LIMIT 1";
+		ucmd.Parameters.AddWithValue("$n", currentName);
+		ownerId = Convert.ToInt32(ucmd.ExecuteScalar() ?? 0);
+	}
+    if (ownerId == 0)
+	{
+		// Auto-provision user in DB when missing (creates a minimal user record)
+		using var create = conn2.CreateCommand();
+		create.CommandText = "INSERT INTO Users (Name, Email, Role, PasswordHash) VALUES ($n,$e,$r,$ph); SELECT last_insert_rowid();";
+		create.Parameters.AddWithValue("$n", currentName ?? string.Empty);
+		var emailCandidate = currentName != null && currentName.Contains("@") ? currentName : string.Empty;
+		create.Parameters.AddWithValue("$e", string.IsNullOrEmpty(emailCandidate) ? (object)DBNull.Value : emailCandidate);
+		create.Parameters.AddWithValue("$r", "User");
+		create.Parameters.AddWithValue("$ph", DBNull.Value);
+		ownerId = Convert.ToInt32(create.ExecuteScalar() ?? 0);
+	}
 
 	using (var chk = conn2.CreateCommand())
 	{
@@ -290,20 +374,31 @@ app.MapPost("/api/reservations", async (HttpContext http) =>
 		}
 	}
 
-	using var cmd2 = conn2.CreateCommand();
-	cmd2.CommandText = "INSERT INTO Reservation (OwnerId, SpaceId, Starting_Date, Ending_Date, Date, StartHour, Hours, Status, Total_Amount) VALUES ($o,$sp,$s,$e,$d,$sh,$h,$st,$t); SELECT last_insert_rowid();";
-	cmd2.Parameters.AddWithValue("$o", ownerId);
-	cmd2.Parameters.AddWithValue("$sp", spaceId);
-	cmd2.Parameters.AddWithValue("$s", start.ToString("o"));
-	cmd2.Parameters.AddWithValue("$e", end.ToString("o"));
-	cmd2.Parameters.AddWithValue("$d", date.ToString("yyyy-MM-dd"));
-	cmd2.Parameters.AddWithValue("$sh", startHour);
-	cmd2.Parameters.AddWithValue("$h", hours);
-	cmd2.Parameters.AddWithValue("$st", "Booked");
-	cmd2.Parameters.AddWithValue("$t", 0);
-	var id = Convert.ToInt32(cmd2.ExecuteScalar() ?? 0);
-	conn2.Close();
-	return Results.Created($"/api/reservations/{id}", new { id = id, ownerId = ownerId, start = start.ToString("o"), end = end.ToString("o"), date = date.ToString("yyyy-MM-dd"), startHour = startHour, hours = hours, spaceId = spaceId });
+    try
+	{
+		using var cmd2 = conn2.CreateCommand();
+		cmd2.CommandText = "INSERT INTO Reservation (OwnerId, SpaceId, Starting_Date, Ending_Date, Date, StartHour, Hours, Status, Total_Amount) VALUES ($o,$sp,$s,$e,$d,$sh,$h,$st,$t); SELECT last_insert_rowid();";
+		cmd2.Parameters.AddWithValue("$o", ownerId);
+		cmd2.Parameters.AddWithValue("$sp", spaceId);
+		cmd2.Parameters.AddWithValue("$s", start.ToString("o"));
+		cmd2.Parameters.AddWithValue("$e", end.ToString("o"));
+		cmd2.Parameters.AddWithValue("$d", date.ToString("yyyy-MM-dd"));
+		cmd2.Parameters.AddWithValue("$sh", startHour);
+		cmd2.Parameters.AddWithValue("$h", hours);
+		cmd2.Parameters.AddWithValue("$st", "Booked");
+		cmd2.Parameters.AddWithValue("$t", 0);
+		var id = Convert.ToInt32(cmd2.ExecuteScalar() ?? 0);
+		conn2.Close();
+		return Results.Created($"/api/reservations/{id}", new { id = id, ownerId = ownerId, start = start.ToString("o"), end = end.ToString("o"), date = date.ToString("yyyy-MM-dd"), startHour = startHour, hours = hours, spaceId = spaceId });
+	}
+	catch (Exception ex)
+	{
+		// log for diagnostics
+		Console.Error.WriteLine($"Reservation insert failed: {ex.Message}\n{ex.StackTrace}");
+		conn2.Close();
+		var err = new { error = ex.Message, detail = ex.InnerException?.Message };
+		return Results.Json(err, statusCode: 500);
+	}
 }).RequireAuthorization();
 
 // Reservations for a given space and date
@@ -315,7 +410,11 @@ app.MapGet("/api/reservations/space", (HttpContext http, int spaceId, string? da
 	conn.Open();
 	using var cmd = conn.CreateCommand();
 	var d = string.IsNullOrEmpty(date) ? DateTime.UtcNow.ToString("yyyy-MM-dd") : date;
-	cmd.CommandText = "SELECT ID, Starting_Date, Ending_Date, Date, StartHour, Hours, Status, Total_Amount, OwnerId FROM Reservation WHERE SpaceId = $sp AND Date = $d ORDER BY StartHour";
+	cmd.CommandText = @"SELECT r.ID, r.Starting_Date, r.Ending_Date, r.Date, r.StartHour, r.Hours, r.Status, r.Total_Amount, r.OwnerId, u.Name as OwnerName
+						FROM Reservation r
+						LEFT JOIN Users u ON r.OwnerId = u.Id
+						WHERE r.SpaceId = $sp AND r.Date = $d
+						ORDER BY r.StartHour";
 	cmd.Parameters.AddWithValue("$sp", spaceId);
 	cmd.Parameters.AddWithValue("$d", d);
 	using var rdr = cmd.ExecuteReader();
@@ -323,7 +422,7 @@ app.MapGet("/api/reservations/space", (HttpContext http, int spaceId, string? da
 	{
 		list.Add(new
 		{
-			id = rdr.GetInt32(0),
+			id = rdr.IsDBNull(0) ? 0 : rdr.GetInt32(0),
 			start = rdr.IsDBNull(1) ? null : rdr.GetString(1),
 			end = rdr.IsDBNull(2) ? null : rdr.GetString(2),
 			date = rdr.IsDBNull(3) ? null : rdr.GetString(3),
@@ -331,7 +430,8 @@ app.MapGet("/api/reservations/space", (HttpContext http, int spaceId, string? da
 			hours = rdr.IsDBNull(5) ? (int?)null : rdr.GetInt32(5),
 			status = rdr.IsDBNull(6) ? null : rdr.GetString(6),
 			total = rdr.IsDBNull(7) ? 0 : rdr.GetDouble(7),
-			ownerId = rdr.IsDBNull(8) ? 0 : rdr.GetInt32(8)
+			ownerId = rdr.IsDBNull(8) ? 0 : rdr.GetInt32(8),
+			ownerName = rdr.IsDBNull(9) ? null : rdr.GetString(9)
 		});
 	}
 	conn.Close();
