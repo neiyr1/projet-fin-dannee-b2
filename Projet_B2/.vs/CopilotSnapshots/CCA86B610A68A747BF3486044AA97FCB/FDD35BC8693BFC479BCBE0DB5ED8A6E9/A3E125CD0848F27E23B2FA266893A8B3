@@ -1,0 +1,13 @@
+﻿@page
+@{ Layout = "_Layout"; ViewData["Title"] = "Home"; }
+<div class="card">
+  <div class="card-body text-center">
+    <svg width="48" height="48" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false" class="mb-2">
+      <rect rx="8" width="48" height="48" fill="#6ee7b7" />
+      <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#063971">C</text>
+    </svg>
+    <h1 class="card-title">Welcome to CoWork Manager</h1>
+    <p class="card-text">Manage your spaces, rooms and bookings from a single place.</p>
+    <a class="btn btn-primary" href="/Spaces">View spaces</a>
+  </div>
+</div>

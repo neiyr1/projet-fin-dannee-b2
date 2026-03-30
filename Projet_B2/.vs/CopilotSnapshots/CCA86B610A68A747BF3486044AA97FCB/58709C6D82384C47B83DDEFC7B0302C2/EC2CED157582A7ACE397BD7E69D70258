@@ -1,0 +1,70 @@
+﻿async function postJson(url, data) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+    credentials: 'include'
+  });
+  return res;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const loginForm = document.getElementById('loginForm');
+  if (loginForm) {
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(loginForm);
+      const res = await postJson('/api/login', { username: fd.get('username'), password: fd.get('password') });
+      if (res.ok) location.href = '/Spaces';
+      else document.getElementById('msg').textContent = 'Login failed';
+    });
+  }
+
+  const addForm = document.getElementById('addForm');
+  if (addForm) {
+    addForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(addForm);
+      const name = fd.get('name');
+      const capacity = parseInt(fd.get('capacity')) || 0;
+      const res = await postJson('/api/spaces', { name, capacity });
+      if (res.ok) {
+        addForm.reset();
+        loadList();
+      } else {
+        alert('Failed to add');
+      }
+    });
+  }
+
+  const logout = document.getElementById('logout');
+  if (logout) {
+    logout.addEventListener('click', async (e) => {
+      e.preventDefault();
+      await postJson('/api/logout', {});
+      location.href = '/Login';
+    });
+  }
+
+  if (document.getElementById('list')) loadList();
+});
+
+async function loadList() {
+  const res = await fetch('/api/spaces', { credentials: 'include' });
+  if (res.status === 401) { location.href = '/Login'; return; }
+  const items = await res.json();
+  const ul = document.getElementById('list');
+  ul.innerHTML = '';
+  for (const it of items) {
+    const li = document.createElement('li');
+    li.textContent = `${it.name} (capacity: ${it.capacity}) `;
+    const del = document.createElement('button');
+    del.textContent = 'Delete';
+    del.addEventListener('click', async () => {
+      const r = await fetch(`/api/spaces/${it.id}`, { method: 'DELETE', credentials: 'include' });
+      if (r.ok) loadList();
+    });
+    li.appendChild(del);
+    ul.appendChild(li);
+  }
+}

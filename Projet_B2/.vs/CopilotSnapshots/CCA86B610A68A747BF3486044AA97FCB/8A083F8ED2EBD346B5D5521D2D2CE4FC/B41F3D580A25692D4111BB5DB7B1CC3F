@@ -1,0 +1,39 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>@ViewData["Title"] - CoWork Manager</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="stylesheet" href="/css/map.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-wrap nav">
+      <div class="brand">
+        <div class="logo"><img src="../wwwroot/images/Logo_1_mini.svg" alt="Logo"/></div>
+        <div>
+          <div style="font-weight:700;">CoWork Manager</div>
+          <div class="muted" style="font-size:12px">Manage your spaces</div>
+        </div>
+      </div>
+      <nav class="nav-links"><a href="/">Home</a><a href="/Spaces">Spaces</a><a href="/Rooms">Rooms</a><a href="/SpacesMap">Map</a></nav>
+      <div class="user-area" id="userArea" style="display:flex;align-items:center;gap:8px;padding-left:12px">
+        <a id="loginLink" href="/Login">Sign in</a>
+        <a id="logout" href="#" style="display:none">Sign out</a>
+        <span id="username" class="muted" style="font-size:13px"></span>
+      </div>
+    </div>
+  </header>
+
+  <div class="site-wrap">
+    <main>
+      @RenderBody()
+    </main>
+  </div>
+
+  <script src="/js/app.js" defer></script>
+  <script src="/js/map.js" defer></script>
+  <script src="/js/booking.js" defer></script>
+</body>
+</html>

@@ -1,23 +1,66 @@
 @page
 @{ Layout = "_Layout"; ViewData["Title"] = "Booking"; }
-<h1>Book a Room</h1>
-<div id="bookingContainer" style="max-width:640px">
-  <form onsubmit="return false;" style="display:grid;gap:8px">
-    <label>Room
-      <select id="spaceSelect"></select>
-    </label>
-    <label>Date
-      <input type="date" id="dateInput" />
-    </label>
-    <label>Start hour (0-23)
-      <input id="startInput" type="number" min="0" max="23" />
-    </label>
-    <label>Hours
-      <input id="hoursInput" type="number" min="1" max="12" />
-    </label>
-    <div style="display:flex;gap:8px;align-items:center">
-      <button id="bookBtn">Book</button>
-      <div id="bookingMsg" class="muted"></div>
-    </div>
-  </form>
+  <div class="d-flex align-items-center gap-3 mb-3">
+  <img src="~/images/Logo_1_mini.svg" asp-append-version="true" alt="Logo" style="height:36px" />
+  <h1 class="h4 mb-3">Book a Room</h1>
 </div>
+<div id="bookingContainer"></div>
+  <div class="row">
+    <div class="col-md-5">
+      <div class="card mb-3">
+        <div class="card-body">
+          <form onsubmit="return false;" id="bookingForm">
+            <div class="mb-3">
+              <label class="form-label">Room</label>
+              <select id="spaceSelect" class="form-select"></select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Date</label>
+              <input type="date" id="dateInput" class="form-control" />
+            </div>
+            <div class="row g-2 mb-3">
+              <div class="col-6">
+                <label class="form-label">Start hour</label>
+                <input id="startInput" type="number" min="0" max="23" class="form-control" />
+              </div>
+              <div class="col-6">
+                <label class="form-label">Hours</label>
+                <input id="hoursInput" type="number" min="1" max="12" class="form-control" />
+              </div>
+            </div>
+            <div class="d-flex gap-2 align-items-center">
+              <button id="bookBtn" class="btn btn-primary">Book</button>
+              <div id="bookingMsg" class="text-muted small"></div>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div>
+              <button id="prevWeek" class="btn btn-sm btn-outline-secondary">&larr;</button>
+              <button id="nextWeek" class="btn btn-sm btn-outline-secondary">&rarr;</button>
+            </div>
+            <div class="fw-semibold" id="weekLabel">Week</div>
+            <div></div>
+          </div>
+          <div id="weekView" class="availability-grid"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-7">
+      <div id="bookedListArea" class="card card-body">
+        <h6 class="mb-2">Bookings</h6>
+        <div id="bookedList">Select a date or room to view bookings</div>
+      </div>
+      <div class="card mt-3 d-none d-md-block">
+        <div class="card-body">
+          <h6 class="mb-2">Legend</h6>
+          <div class="d-flex gap-2 align-items-center"><span class="badge bg-success">✓ Free</span><span class="badge bg-warning text-dark">1..n Booked</span><span class="badge bg-danger">× Full</span></div>
+        </div>
+      </div>
+    </div>
+  </div>

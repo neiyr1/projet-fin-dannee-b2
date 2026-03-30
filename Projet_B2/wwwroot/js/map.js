@@ -44,18 +44,19 @@ function renderMap(spaces){
     rect.setAttribute('height', cellH);
     rect.classList.add('space-rect');
     if(s.capacity && s.capacity < 2) rect.classList.add('occupied');
-    rect.addEventListener('click', ()=>{ selectSpace(s.id); });
+    rect.addEventListener('click', (e)=>{ e.stopPropagation(); console.log('rect click', s.id); selectSpace(s.id); });
     const title = document.createElementNS(svgNS,'title');
     title.textContent = `${s.name} — capacity ${s.capacity}`;
     rect.appendChild(title);
     svg.appendChild(rect);
-    rect.dataset.spaceId = s.id;
+    rect.setAttribute('data-space-id', s.id);
 
     const name = document.createElementNS(svgNS,'text');
     name.setAttribute('x', x + 12);
     name.setAttribute('y', y + 28);
     name.setAttribute('class','space-label');
     name.textContent = s.name;
+    name.setAttribute('pointer-events', 'none');
     svg.appendChild(name);
 
     const cap = document.createElementNS(svgNS,'text');
@@ -63,6 +64,7 @@ function renderMap(spaces){
     cap.setAttribute('y', y + 48);
     cap.setAttribute('class','space-cap');
     cap.textContent = `Capacity: ${s.capacity}`;
+    cap.setAttribute('pointer-events', 'none');
     svg.appendChild(cap);
   });
 
@@ -84,7 +86,117 @@ function selectSpace(id){
   const spaces = window.__spacesCache || [];
   const s = spaces.find(x=>x.id==id);
   const detail = document.getElementById('detailPanel');
-  if(s && detail){ detail.innerHTML = `<strong>${s.name}</strong><div>Capacity: ${s.capacity}</div>`; }
+  if(s && detail){
+    // show basic info + week calendar
+    // immediate visual debug marker so clicks always show activity
+    detail.innerHTML = `<div id="mapDebug" class="mb-2 text-muted">Preparing calendar...</div>`;
+    const debugEl = document.getElementById('mapDebug');
+    if (debugEl) debugEl.textContent = `Preparing calendar for ${s.name}...`;
+
+    // now build the UI
+    detail.innerHTML += `
+      <div class="mb-2"><strong>${s.name}</strong> <div class="text-muted small">Capacity: ${s.capacity}</div></div>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div>
+          <button id="mapPrevWeek" class="btn btn-sm btn-outline-secondary">&larr;</button>
+          <button id="mapNextWeek" class="btn btn-sm btn-outline-secondary">&rarr;</button>
+        </div>
+        <div id="mapWeekLabel" class="fw-semibold"></div>
+        <div><a href="/Booking" class="btn btn-sm btn-primary">Open booking panel</a></div>
+      </div>
+      <div id="mapWeekView" style="min-height:160px">Loading week...</div>
+    `;
+    // render week calendar for this space
+    console.log('selectSpace', s.id);
+    renderSpaceWeek(s.id, s.capacity);
+    // wire nav
+    document.getElementById('mapPrevWeek').addEventListener('click', ()=> { mapWeekStart = addDays(mapWeekStart, -7); renderSpaceWeek(s.id, s.capacity); });
+    document.getElementById('mapNextWeek').addEventListener('click', ()=> { mapWeekStart = addDays(mapWeekStart, 7); renderSpaceWeek(s.id, s.capacity); });
+  }
+}
+
+// week state for map panel
+let mapWeekStart = startOfWeek(new Date());
+
+function startOfWeek(d){ const dt = new Date(d); const day = dt.getDay(); const diff = (day + 6) % 7; dt.setDate(dt.getDate()-diff); dt.setHours(0,0,0,0); return dt; }
+function addDays(d,n){ const r = new Date(d); r.setDate(r.getDate()+n); return r; }
+
+async function renderSpaceWeek(spaceId, capacity){
+  const grid = document.getElementById('mapWeekView');
+  const lbl = document.getElementById('mapWeekLabel');
+  if(!grid) return;
+  grid.innerHTML = 'Loading...';
+  console.log('renderSpaceWeek', { spaceId, capacity, mapWeekStart });
+  const days = [];
+  for(let i=0;i<7;i++) days.push(addDays(mapWeekStart,i));
+  lbl.textContent = `${days[0].toISOString().slice(0,10)} → ${days[6].toISOString().slice(0,10)}`;
+
+  // fetch reservations per day
+  const promises = days.map(d => fetch(`/api/reservations/space?spaceId=${spaceId}&date=${d.toISOString().slice(0,10)}`, { credentials: 'include' })
+    .then(async r=> {
+      if (!r.ok) {
+        const txt = await r.text().catch(()=>null);
+        throw new Error(`HTTP ${r.status} ${r.statusText} ${txt||''}`);
+      }
+      return r.json();
+    }));
+  let results;
+  try{
+    results = await Promise.all(promises);
+  } catch(err){
+    console.error('Failed to load reservations', err);
+    grid.innerHTML = `<div class="text-danger">Failed to load reservations: ${err.message}</div>`;
+    // if unauthorized, redirect to login
+    if (String(err.message).includes('HTTP 401')){
+      window.location.href = '/Login';
+    }
+    return;
+  }
+
+  grid.innerHTML = '';
+  const table = document.createElement('table'); table.className = 'table table-sm';
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  hr.innerHTML = '<th>Hour</th>' + days.map(d=>`<th>${d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}</th>`).join('');
+  thead.appendChild(hr); table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  for(let h=0; h<24; h++){
+    const tr = document.createElement('tr');
+    const th = document.createElement('th'); th.textContent = `${h}:00`; tr.appendChild(th);
+    for(let di=0; di<7; di++){
+      const cell = document.createElement('td');
+      const dayBookings = results[di] || [];
+      const bookingsAtHour = dayBookings.filter(b=>{
+        const s = b.startHour ?? (b.start? new Date(b.start).getHours():0);
+        const hrs = b.hours ?? Math.max(1, Math.round((b.end && b.start) ? (new Date(b.end)-new Date(b.start))/3600000 : 1));
+        return (h >= s) && (h < s+hrs) && (b.status === 'Booked');
+      });
+      const count = bookingsAtHour.length;
+      if(count >= capacity) { cell.className = 'bg-danger text-white'; cell.textContent = '×'; }
+      else if(count > 0) { cell.className = 'bg-warning text-dark'; cell.textContent = String(count); }
+      else { cell.className = 'bg-success text-white'; cell.textContent = '✓'; }
+
+      if(count>0){
+        const bk = bookingsAtHour[0];
+        const owner = bk.ownerName || ('User#'+(bk.ownerId||'?'));
+        const st = bk.status || 'Booked';
+        cell.title = `${owner} — ${st}`;
+      }
+
+      // clicking a cell opens Booking page with prefilled params
+      cell.style.cursor = 'pointer';
+      cell.addEventListener('click', ()=>{
+        const selectedDate = days[di].toISOString().slice(0,10);
+        // navigate to booking page and prefill via query string
+        window.location.href = `/Booking?spaceId=${encodeURIComponent(spaceId)}&date=${encodeURIComponent(selectedDate)}&start=${h}`;
+      });
+
+      tr.appendChild(cell);
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  grid.appendChild(table);
 }
 
 async function loadAndRender(){

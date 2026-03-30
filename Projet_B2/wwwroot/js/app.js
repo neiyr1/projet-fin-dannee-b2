@@ -8,6 +8,30 @@ async function postJson(url, data) {
   return res;
 }
 
+async function refreshUser() {
+  try {
+    const res = await fetch('/api/me', { credentials: 'include' });
+    const loginLink = document.getElementById('loginLink');
+    const logout = document.getElementById('logout');
+    const username = document.getElementById('username');
+    if (!loginLink || !logout || !username) return;
+    if (res.ok) {
+      const data = await res.json();
+      loginLink.style.display = 'none';
+      logout.style.display = 'inline';
+      username.textContent = data.user || '';
+      username.style.display = 'inline-block';
+    } else {
+      loginLink.style.display = 'inline';
+      logout.style.display = 'none';
+      username.textContent = '';
+      username.style.display = 'none';
+    }
+  } catch (e) {
+    // ignore network errors
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const loginForm = document.getElementById('loginForm');
   if (loginForm) {
@@ -15,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       const fd = new FormData(loginForm);
       const res = await postJson('/api/login', { username: fd.get('username'), password: fd.get('password') });
-      if (res.ok) location.href = '/Spaces';
+      if (res.ok) location.href = '/Spaces'; // No-op change for tracking
       else document.getElementById('msg').textContent = 'Login failed';
     });
   }
@@ -42,11 +66,22 @@ document.addEventListener('DOMContentLoaded', () => {
     logout.addEventListener('click', async (e) => {
       e.preventDefault();
       await postJson('/api/logout', {});
-      location.href = '/Login';
+      // after logout, reload to hit the login page due to server-side auth requirement
+      window.location.href = '/Login';
     });
   }
 
   if (document.getElementById('list')) loadList();
+  // Refresh user on page load and redirect to login if not authenticated and not already on /Login
+  refreshUser().then(() => {
+    const path = window.location.pathname.toLowerCase();
+    if (path !== '/login' && document.getElementById('loginForm') == null) {
+      // If user is not authenticated, the server will redirect API calls to 401; attempt a quick check
+      fetch('/api/me', { credentials: 'include' }).then(r => {
+        if (!r.ok) window.location.href = '/Login';
+      }).catch(() => { /* ignore */ });
+    }
+  });
 });
 
 async function loadList() {

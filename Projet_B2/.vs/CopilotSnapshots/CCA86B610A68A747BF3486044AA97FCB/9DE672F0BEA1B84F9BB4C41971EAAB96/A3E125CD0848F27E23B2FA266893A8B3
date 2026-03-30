@@ -1,0 +1,9 @@
+﻿@page
+@{ Layout = "_Layout"; ViewData["Title"] = "Home"; }
+<div class="card">
+  <div class="card-body">
+    <h1 class="card-title">Welcome to CoWork Manager</h1>
+    <p class="card-text">Manage your spaces, rooms and bookings from a single place.</p>
+    <a class="btn btn-primary" href="/Spaces">View spaces</a>
+  </div>
+</div>

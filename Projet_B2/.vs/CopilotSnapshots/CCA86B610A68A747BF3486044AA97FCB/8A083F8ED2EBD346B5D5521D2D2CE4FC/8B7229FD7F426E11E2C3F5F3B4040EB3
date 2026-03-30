@@ -1,0 +1,14 @@
+﻿@page
+@{ Layout = "_Layout"; ViewData["Title"] = "Rooms"; }
+<h1>Rooms</h1>
+<div style="margin-bottom:12px">
+  <form id="addRoomForm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <input name="name" placeholder="Name" required style="flex:1;min-width:160px">
+    <input name="capacity" type="number" placeholder="Capacity" required style="width:120px">
+    <input name="location" placeholder="Location" style="width:160px">
+    <button type="submit">Add Room</button>
+  </form>
+</div>
+<ul id="roomsList"></ul>
+<p class="muted"> <a href="/SpacesMap">Back to map</a></p>
+<script src="/js/rooms.js" defer></script>

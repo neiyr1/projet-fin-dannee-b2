@@ -1,0 +1,83 @@
+﻿document.addEventListener('DOMContentLoaded', () => {
+  const container = document.getElementById('bookingContainer');
+  if (!container) return;
+
+  const spaceSel = document.getElementById('spaceSelect');
+  const dateInput = document.getElementById('dateInput');
+  const startInput = document.getElementById('startInput');
+  const hoursInput = document.getElementById('hoursInput');
+  const bookBtn = document.getElementById('bookBtn');
+  const msg = document.getElementById('bookingMsg');
+
+  async function loadSpaces(){
+    // Load rooms (persisted) so users can book rooms
+    const res = await fetch('/api/rooms', { credentials: 'include' });
+    if (!res.ok) return;
+    const spaces = await res.json();
+    spaceSel.innerHTML = '';
+    for (const s of spaces){
+      const opt = document.createElement('option');
+      opt.value = s.id; opt.textContent = `${s.name} (cap ${s.capacity})`;
+      spaceSel.appendChild(opt);
+    }
+    // After loading spaces, fetch existing bookings for the selected space/date
+    spaceSel.addEventListener('change', ()=> fetchBookedSlots());
+  }
+
+  bookBtn.addEventListener('click', async (e)=>{
+    e.preventDefault();
+    const payload = {
+      spaceId: parseInt(spaceSel.value,10),
+      date: dateInput.value,
+      startHour: parseInt(startInput.value,10),
+      hours: parseInt(hoursInput.value,10)
+    };
+    const res = await fetch('/api/reservations', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload), credentials: 'include' });
+    if (res.ok){
+      msg.textContent = 'Booked ✓'; msg.style.color='green';
+      await fetchBookedSlots();
+    } else if (res.status === 409) {
+      const j = await res.json().catch(()=>null);
+      msg.textContent = j?.error || 'Time conflict';
+      msg.style.color = 'red';
+    } else {
+      const j = await res.json().catch(()=>null);
+      msg.textContent = j?.error || 'Booking failed'; msg.style.color='red';
+    }
+  });
+
+  async function fetchBookedSlots(){
+    const out = document.getElementById('bookedList') || createBookedList();
+    out.innerHTML = 'Loading...';
+    const sp = parseInt(spaceSel.value,10);
+    if (!sp) { out.innerHTML = 'No space selected'; return; }
+    const d = dateInput.value || new Date().toISOString().slice(0,10);
+    const res = await fetch(`/api/reservations/space?spaceId=${sp}&date=${encodeURIComponent(d)}`, { credentials: 'include' });
+    if (!res.ok) { out.innerHTML = 'Failed to load bookings'; return; }
+    const items = await res.json();
+    if (!items.length) { out.innerHTML = 'No bookings for this date'; return; }
+    out.innerHTML = '';
+    const ul = document.createElement('ul');
+    items.forEach(it=>{
+      const li = document.createElement('li');
+      const start = it.startHour ?? new Date(it.start).getHours();
+      const hours = it.hours ?? Math.max(1, Math.round((new Date(it.end)-new Date(it.start))/3600000));
+      li.textContent = `${it.date || ''} ${start}:00 for ${hours}h — ${it.status || ''}`;
+      ul.appendChild(li);
+    });
+    out.appendChild(ul);
+  }
+
+  function createBookedList(){
+    const el = document.createElement('div');
+    el.id = 'bookedList';
+    const form = document.querySelector('#bookingContainer form');
+    form.appendChild(el);
+    return el;
+  }
+
+  dateInput.value = new Date().toISOString().slice(0,10);
+  startInput.value = '9'; hoursInput.value = '1';
+  loadSpaces().then(()=> fetchBookedSlots());
+  dateInput.addEventListener('change', ()=> fetchBookedSlots());
+});
