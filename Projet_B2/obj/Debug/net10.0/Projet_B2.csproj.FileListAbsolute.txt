@@ -72,7 +72,6 @@ C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2
 C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\rjsmrazor.dswa.cache.json
 C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\rjsmcshtml.dswa.cache.json
 C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\scopedcss\bundle\Projet_B2.styles.css
-C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\xaeppe8edk-{0}-79cil1hos7-79cil1hos7.gz
 C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\v242ckb9io-{0}-e2q3lp3gbt-e2q3lp3gbt.gz
 C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\xk4ri3yzdj-{0}-1og2uzv7tl-1og2uzv7tl.gz
 C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\tllmk105dl-{0}-8cdfmyzgjt-8cdfmyzgjt.gz
@@ -89,6 +88,12 @@ C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2
 C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\ref\Projet_B2.dll
 C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\9bfaktcu84-{0}-sh29ubzn9c-sh29ubzn9c.gz
 C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\ehbbwuqqjb-{0}-24w6bvj7so-24w6bvj7so.gz
-C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\l7syb573dj-{0}-ia29mq5t0p-ia29mq5t0p.gz
-C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\7kcm1avxrj-{0}-343wr1if3y-343wr1if3y.gz
-C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\0brfwdzdx6-{0}-7wz9b189w9-7wz9b189w9.gz
+C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\4rp43sfijc-{0}-d92qse2omv-d92qse2omv.gz
+C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\kc3xizgmnz-{0}-fkmltwtblu-fkmltwtblu.gz
+C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\co1pcmb5cd-{0}-ctvgjsla90-ctvgjsla90.gz
+C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\0h9fpolg3o-{0}-4jq6l3fsoc-4jq6l3fsoc.gz
+C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\poxg7fk4lb-{0}-26yccbu7rk-26yccbu7rk.gz
+C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\xaeppe8edk-{0}-w17b7hk9qt-w17b7hk9qt.gz
+C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\0brfwdzdx6-{0}-4q3hm7waqc-4q3hm7waqc.gz
+C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\l7syb573dj-{0}-k2f9mgzvy2-k2f9mgzvy2.gz
+C:\Users\U448751\source\repos\romain.jean\Project\projet-fin-dannee-b2\Projet_B2\obj\Debug\net10.0\compressed\7kcm1avxrj-{0}-ke1ik9k9qp-ke1ik9k9qp.gz

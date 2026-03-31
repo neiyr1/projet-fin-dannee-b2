@@ -603,11 +603,11 @@ CREATE TABLE IF NOT EXISTS Rooms (
 
 				cmd.CommandText = "SELECT COUNT(1) FROM Users WHERE Email = $email";
 				cmd.Parameters.AddWithValue("$email", "admin@example.com");
-				var exists = Convert.ToInt32(cmd.ExecuteScalar() ?? 0) > 0;
+                var exists = Convert.ToInt32(cmd.ExecuteScalar() ?? 0) > 0;
+				var password = "admin123"; // default admin password (change in production)
+				var hash = CreatePasswordHash(password);
 				if (!exists)
 				{
-						var password = "admin"; // default admin password (change in production)
-						var hash = CreatePasswordHash(password);
 						using var insert = conn.CreateCommand();
 						insert.CommandText = "INSERT INTO Users (Name, Last_Name, Email, Role, PasswordHash) VALUES ($n,$ln,$email,$role,$ph)";
 						insert.Parameters.AddWithValue("$n", "Admin");
@@ -616,6 +616,15 @@ CREATE TABLE IF NOT EXISTS Rooms (
 						insert.Parameters.AddWithValue("$role", "Admin");
 						insert.Parameters.AddWithValue("$ph", hash);
 						insert.ExecuteNonQuery();
+				}
+				else
+				{
+						// Ensure existing admin has the requested default password
+						using var update = conn.CreateCommand();
+						update.CommandText = "UPDATE Users SET PasswordHash = $ph WHERE Email = $email";
+						update.Parameters.AddWithValue("$ph", hash);
+						update.Parameters.AddWithValue("$email", "admin@example.com");
+						update.ExecuteNonQuery();
 				}
 
 				conn.Close();
