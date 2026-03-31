@@ -1,0 +1,8 @@
+/* Local stub of FullCalendar CSS — includes minimal styles so app loads when CDN is blocked.
+   Replace with real FullCalendar assets in production or restore CDN access. */
+
+#fullCalendar { min-height: 300px; padding: 8px; background: linear-gradient(180deg,#fff,#f7fbff); border-radius:8px; }
+.fc-stub-warning{color:#334155;font-weight:600;padding:12px;text-align:center}
+
+/* Basic event pill styles used by stub calendar rendering */
+.fc-stub-event{display:inline-block;margin:6px;padding:6px 10px;border-radius:6px;color:#fff;background:#6366f1;box-shadow:0 4px 10px rgba(2,6,23,0.06)}

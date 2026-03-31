@@ -36,19 +36,46 @@ p{color:var(--muted);line-height:1.6}
 .form-control, .form-select { border-radius:10px; }
 
 /* Availability grid/table */
-.availability-grid table { width:100%; border-collapse:collapse; }
-.availability-grid th, .availability-grid td { padding:6px 8px; text-align:center; vertical-align:middle; border:1px solid rgba(2,6,23,0.04); }
-.availability-grid thead th { background: linear-gradient(180deg, #fbfdff, #f6f8ff); font-weight:600; }
-.availability-grid td.bg-success { background: linear-gradient(180deg,#10b981,#059669); }
-.availability-grid td.bg-warning { background: linear-gradient(180deg,#f59e0b,#d97706); }
-.availability-grid td.bg-danger { background: linear-gradient(180deg,#ef4444,#dc2626); }
-.availability-grid td { color:#fff; }
-.availability-grid td.free { background: #ecfccb; color:#166534; }
+.availability-grid table { width:100%; border-collapse:collapse; border-radius:8px; overflow:hidden; }
+.availability-grid th, .availability-grid td { padding:8px 10px; text-align:center; vertical-align:middle; border-right:1px solid rgba(2,6,23,0.06); border-bottom:1px solid rgba(2,6,23,0.04); }
+.availability-grid thead th { background: linear-gradient(180deg, #fbfdff, #f6f8ff); font-weight:700; border-bottom:2px solid rgba(2,6,23,0.06); }
+.availability-grid tbody th { background:#fbfbff; font-weight:600; color:var(--muted); }
+.availability-grid td.occupied.full { background: linear-gradient(180deg,#ef4444,#dc2626); color:#fff; }
+.availability-grid td.occupied.partial { background: linear-gradient(180deg,#f59e0b,#d97706); color:#111; }
+.availability-grid td.free { background: linear-gradient(180deg,#10b981,#059669); color:#fff; }
+.availability-grid td .cell-icon{display:inline-block;font-weight:700;padding:6px 8px;border-radius:6px;}
+.availability-grid td .cell-count{display:inline-block;font-weight:700;padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.4)}
+.availability-grid td{cursor:default}
+.availability-grid td:hover{transform:translateY(-2px);transition:all .12s ease}
+
+/* Map detail preview button styling */
+.map-preview-btn { min-width:120px }
+
+/* Modal adjustments for booking preview */
+.modal-body #bookingContainer { display:block !important }
+.modal-body #fullCalendarModal { margin-top:12px }
+
+/* FullCalendar tweaks */
+#fullCalendar { background: #fff; border-radius:8px; padding:8px; box-shadow: 0 6px 18px rgba(2,6,23,0.06); }
+.legend-item{font-size:13px;color:var(--muted)}
+.legend-item .badge{width:28px;text-align:center}
+.fc .fc-event { border: none; color: #fff; padding:4px 6px; border-radius:4px }
+.fc .fc-event { background: linear-gradient(180deg,#6366f1,#4338ca) }
+.fc-timegrid-event .fc-event-main { font-weight:600 }
+/* Cool styling for FullCalendar */
+.fc .fc-toolbar-title { font-weight:800; font-size:1.05rem; color:var(--accent-strong) }
+.fc .fc-button { border-radius:8px; box-shadow:none }
+.fc .fc-button-primary { background: linear-gradient(180deg,#06b6d4,#0891b2); border:none }
+.fc .fc-daygrid-event { border-radius:6px; box-shadow: 0 4px 10px rgba(2,6,23,0.08) }
+.fc-timegrid-event .fc-event-main { color: #fff }
+.fc .fc-scroller-liquid-absolute { background: linear-gradient(180deg,#f8fafc,#eef2ff) }
+.fc .fc-toolbar { background: linear-gradient(90deg,#ffffff,#fbfdff); border-radius:8px; padding:8px }
+.fc .fc-daygrid-day-number { color:var(--muted) }
 
 /* small screens: make calendar scroll horizontally */
 @media (max-width: 768px) {
   .availability-grid table { display:block; overflow-x:auto; white-space:nowrap; }
-  .availability-grid th, .availability-grid td { min-width:80px; }
+  .availability-grid th, .availability-grid td { min-width:70px; }
 }
 .nav{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .brand{display:flex;align-items:center;gap:12px}

@@ -24,7 +24,34 @@
 
   <section class="col-md-9">
     <div id="mapContainer" class="card mb-2 shadow-sm" style="min-height:300px" aria-label="Co-working spaces map"></div>
-    <div id="detailPanel" class="card card-body text-muted small mt-2">Hover a space to see details</div>
+    <div id="detailPanel" class="detail-panel mt-2"></div>
+    <div class="card mt-3">
+      <div class="card-body">
+        <h6>Booking calendar</h6>
+        <div id="bookingContainer" style="display:none">
+          <div class="row g-2 mb-2">
+            <div class="col-auto">
+              <select id="spaceSelect" class="form-select form-select-sm"></select>
+            </div>
+            <div class="col-auto">
+              <input id="dateInput" type="date" class="form-control form-control-sm" />
+            </div>
+            <div class="col-auto">
+              <input id="startInput" type="number" class="form-control form-control-sm" style="width:80px" />
+            </div>
+            <div class="col-auto">
+              <input id="hoursInput" type="number" class="form-control form-control-sm" style="width:80px" />
+            </div>
+            <div class="col-auto">
+              <button id="bookBtn" class="btn btn-sm btn-primary">Book</button>
+            </div>
+            <div class="col-auto"><div id="bookingMsg" class="small text-muted"></div></div>
+          </div>
+          <div id="weekControls" class="mb-2 d-flex gap-2 align-items-center"><button id="prevWeek" class="btn btn-sm btn-outline-secondary">&lt;</button><div id="weekLabel" class="fw-bold"></div><button id="nextWeek" class="btn btn-sm btn-outline-secondary">&gt;</button></div>
+          <div id="weekView" style="overflow:auto"></div>
+        </div>
+      </div>
+    </div>
   </section>
 </div>
 
