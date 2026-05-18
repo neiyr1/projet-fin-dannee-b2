@@ -1,0 +1,46 @@
+@page
+@{ Layout = "_Layout"; ViewData["Title"] = "Ressources"; }
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="d-flex align-items-center gap-3">
+    <img src="~/images/Logo_1_mini.svg" asp-append-version="true" alt="Logo" style="height:36px" />
+    <h1 class="h4 mb-0">Ressources disponibles</h1>
+  </div>
+</div>
+
+<div id="adminSection" class="card mb-4" style="display:none">
+  <div class="card-header fw-semibold">Ajouter une ressource</div>
+  <div class="card-body">
+    <form id="addResourceForm" class="row g-2 align-items-end">
+      <div class="col-sm">
+        <label class="form-label small">Nom *</label>
+        <input name="name" placeholder="Ex: Projecteur HD" required class="form-control" />
+      </div>
+      <div class="col-sm">
+        <label class="form-label small">Type</label>
+        <select name="type" class="form-select">
+          <option value="Équipement">Équipement</option>
+          <option value="Mobilier">Mobilier</option>
+          <option value="Informatique">Informatique</option>
+          <option value="Autre">Autre</option>
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label small">Capacité</label>
+        <input name="capacity" type="number" min="0" placeholder="1" class="form-control" style="width:100px" />
+      </div>
+      <div class="col-auto">
+        <label class="form-label small">Prix (€/h)</label>
+        <input name="price" type="number" min="0" step="0.01" placeholder="0.00" class="form-control" style="width:110px" />
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-primary">Ajouter</button>
+      </div>
+      <div class="col-12"><div id="addMsg" class="small text-muted"></div></div>
+    </form>
+  </div>
+</div>
+
+<div class="row" id="resourcesGrid"></div>
+<div id="emptyMsg" class="text-muted" style="display:none">Aucune ressource enregistrée.</div>
+
+<script src="/js/resources.js" defer></script>

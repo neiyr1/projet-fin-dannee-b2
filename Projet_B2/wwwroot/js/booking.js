@@ -48,7 +48,6 @@ document.addEventListener('DOMContentLoaded', () => {
       try{
         const id = ev?.detail?.id;
         if (id) {
-          console.log('[booking] space:selected event received', id);
           showBookingForSpace(id);
         }
       }catch(e){ console.warn('[booking] space:selected handler failed', e); }
@@ -65,7 +64,6 @@ document.addEventListener('DOMContentLoaded', () => {
             el.style.display = 'none';
             document.body.appendChild(el);
             initFullCalendar('fullCalendarBootstrap');
-            console.log('[booking] FullCalendar warm-up completed');
           }
         } catch (err){ console.warn('[booking] FullCalendar warm-up failed', err); }
         return true;
@@ -78,11 +76,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     bookBtn.addEventListener('click', async (e)=>{
       e.preventDefault();
+      const spaceId = parseInt(spaceSel.value, 10);
+      const startHour = parseInt(startInput.value, 10);
+      const hoursVal = parseInt(hoursInput.value, 10);
+      const dateVal = dateInput.value;
+      if (!dateVal) { msg.textContent = 'Please select a date.'; msg.style.color='red'; return; }
+      if (isNaN(spaceId) || spaceId <= 0) { msg.textContent = 'Please select a room.'; msg.style.color='red'; return; }
+      if (isNaN(startHour) || startHour < 7 || startHour > 21) { msg.textContent = 'Start hour must be between 7 and 21.'; msg.style.color='red'; return; }
+      if (isNaN(hoursVal) || hoursVal < 1) { msg.textContent = 'Duration must be at least 1 hour.'; msg.style.color='red'; return; }
+      if (startHour + hoursVal > 24) { msg.textContent = 'Booking cannot extend past midnight.'; msg.style.color='red'; return; }
       const payload = {
-        spaceId: parseInt(spaceSel.value,10),
-        date: dateInput.value,
-        startHour: parseInt(startInput.value,10),
-        hours: parseInt(hoursInput.value,10)
+        spaceId,
+        date: dateVal,
+        startHour,
+        hours: hoursVal
       };
       const res = await fetch('/api/reservations', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload), credentials: 'include' });
       if (res.ok){
@@ -115,6 +122,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const start = it.startHour ?? (it.start ? new Date(it.start).getHours() : 0);
         const hours = it.hours ?? Math.max(1, Math.round((new Date(it.end)-new Date(it.start))/3600000));
         li.textContent = `${it.date || ''} ${start}:00 for ${hours}h — ${it.ownerName || it.status || ''}`;
+        if (it.status === 'Booked') {
+          const btn = document.createElement('button');
+          btn.textContent = 'Cancel';
+          btn.className = 'btn btn-sm btn-outline-danger ms-2';
+          btn.addEventListener('click', async () => {
+            if (!confirm(`Cancel booking on ${it.date} at ${start}:00?`)) return;
+            const r = await fetch(`/api/reservations/${it.id}`, { method: 'DELETE', credentials: 'include' });
+            if (r.ok || r.status === 204) { await fetchBookedSlots(); await renderWeek(); }
+            else { const j = await r.json().catch(()=>null); alert(j?.error || 'Failed to cancel booking'); }
+          });
+          li.appendChild(btn);
+        }
         ul.appendChild(li);
       });
       out.appendChild(ul);
@@ -136,6 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('prevWeek').addEventListener('click', ()=> { weekStart = addDays(weekStart, -7); renderWeek(); });
     document.getElementById('nextWeek').addEventListener('click', ()=> { weekStart = addDays(weekStart, 7); renderWeek(); });
+    document.getElementById('todayBtn').addEventListener('click', ()=> { weekStart = startOfWeek(new Date()); renderWeek(); });
     dateInput.addEventListener('change', ()=> { weekStart = startOfWeek(new Date(dateInput.value)); renderWeek(); fetchBookedSlots(); });
 
     await loadSpaces();
@@ -155,7 +175,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // render week availability grid
     async function renderWeek(){
       const grid = document.getElementById('weekView');
-      console.log('[booking] renderWeek: visible hours 07:00-21:00');
       const lbl = document.getElementById('weekLabel');
       grid.innerHTML = 'Loading...';
       const sp = parseInt(spaceSel.value,10);
@@ -268,7 +287,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       fcEl.dataset.inited = '1';
-      console.log('[booking] initFullCalendar: setting slotMinTime=07:00, slotMaxTime=21:00');
       let calendar;
       const options = {
         initialView: 'timeGridWeek',
@@ -378,7 +396,6 @@ document.addEventListener('DOMContentLoaded', () => {
     window.initFullCalendar = initFullCalendar;
 
     window.showBookingForSpace = async function(spaceId){
-      console.log('[booking] showBookingForSpace()', spaceId);
       // ensure spaces/options are loaded
       await loadSpaces();
       // reveal panel
@@ -392,18 +409,6 @@ document.addEventListener('DOMContentLoaded', () => {
         container.style.setProperty('opacity','1','important');
         container.hidden = false;
         container.classList.remove('d-none');
-        console.log('[booking] bookingContainer made visible');
-        // dump computed styles and ancestor visibility to help debug layout issues
-        const cs = window.getComputedStyle(container);
-        console.log('[booking] bookingContainer computed style', { display: cs.display, visibility: cs.visibility, opacity: cs.opacity, offsetParent: container.offsetParent });
-        let el = container;
-        const ancestors = [];
-        while(el && el !== document.documentElement){
-          const s = window.getComputedStyle(el);
-          ancestors.push({ tag: el.tagName, id: el.id || null, classes: el.className || null, display: s.display, visibility: s.visibility, opacity: s.opacity, offsetParent: el.offsetParent ? el.offsetParent.tagName : null });
-          el = el.parentElement;
-        }
-        console.log('[booking] ancestor chain', ancestors);
       } catch (e) { console.warn('[booking] failed to force-show bookingContainer', e); }
 
       // help UX: bring booking panel into view and add a brief highlight so it's obvious
@@ -430,7 +435,6 @@ document.addEventListener('DOMContentLoaded', () => {
       // load bookings and render week
       await fetchBookedSlots();
       await renderWeek();
-      console.log('[booking] showBookingForSpace() done');
     };
 
   })();

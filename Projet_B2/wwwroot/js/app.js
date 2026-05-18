@@ -19,8 +19,10 @@ async function refreshUser() {
       const data = await res.json();
       loginLink.style.display = 'none';
       logout.style.display = 'inline';
-      username.textContent = data.user || '';
+      username.textContent = (data.role === 'Admin' ? '⚙ ' : '') + (data.user || '');
       username.style.display = 'inline-block';
+      // show/hide admin-only nav items
+      document.querySelectorAll('.nav-admin').forEach(el => el.style.display = data.role === 'Admin' ? '' : 'none');
     } else {
       loginLink.style.display = 'inline';
       logout.style.display = 'none';
@@ -39,7 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       const fd = new FormData(loginForm);
       const res = await postJson('/api/login', { username: fd.get('username'), password: fd.get('password') });
-      if (res.ok) location.href = '/Spaces'; // No-op change for tracking
+      if (res.ok) location.href = '/Booking';
       else document.getElementById('msg').textContent = 'Login failed';
     });
   }
