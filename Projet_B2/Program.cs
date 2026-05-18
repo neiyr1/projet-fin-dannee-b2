@@ -57,11 +57,6 @@ string GetDbPath() => DbHelpers.GetDbPath(websitePath);
 
 var app = builder.Build();
 
-// Serve `login.html` as the default document when visiting the site root
-var defaultFilesOptions = new DefaultFilesOptions();
-defaultFilesOptions.DefaultFileNames.Clear();
-defaultFilesOptions.DefaultFileNames.Add("login.html");
-app.UseDefaultFiles(defaultFilesOptions);
 app.UseStaticFiles();
 
 app.UseAuthentication();
@@ -142,7 +137,8 @@ app.MapPost("/api/logout", async (HttpContext http) =>
 app.MapGet("/api/me", (ClaimsPrincipal user) =>
 {
 	if (user?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
-	return Results.Ok(new { user = user.Identity?.Name });
+	var role = user.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? "";
+	return Results.Ok(new { user = user.Identity?.Name, role });
 });
 
 app.MapGet("/api/spaces", () =>
@@ -332,6 +328,9 @@ app.MapPost("/api/reservations", async (HttpContext http) =>
 
 	var date = DateTime.Parse(dateStr).Date;
 	if (startHour < 0 || startHour > 23) return Results.BadRequest(new { error = "startHour must be 0-23" });
+	if (spaceId <= 0) return Results.BadRequest(new { error = "spaceId must be a positive integer" });
+	if (hours <= 0) return Results.BadRequest(new { error = "hours must be at least 1" });
+	if (startHour + hours > 24) return Results.BadRequest(new { error = "Booking cannot extend past midnight" });
 	var start = DateTime.SpecifyKind(date.AddHours(startHour), DateTimeKind.Utc);
 	var end = start.AddHours(hours);
 
@@ -360,23 +359,28 @@ app.MapPost("/api/reservations", async (HttpContext http) =>
 		ownerId = Convert.ToInt32(create.ExecuteScalar() ?? 0);
 	}
 
+	using var txn = conn2.BeginTransaction(System.Data.IsolationLevel.Serializable);
+	int conflict;
 	using (var chk = conn2.CreateCommand())
 	{
+		chk.Transaction = txn;
 		chk.CommandText = @"SELECT COUNT(1) FROM Reservation WHERE SpaceId = $sp AND Status = 'Booked' AND NOT (Ending_Date <= $s OR Starting_Date >= $e);";
 		chk.Parameters.AddWithValue("$sp", spaceId);
 		chk.Parameters.AddWithValue("$s", start.ToString("o"));
 		chk.Parameters.AddWithValue("$e", end.ToString("o"));
-		var conflict = Convert.ToInt32(chk.ExecuteScalar() ?? 0);
-		if (conflict > 0)
-		{
-			conn2.Close();
-			return Results.Conflict(new { error = "Time slot already booked for this space" });
-		}
+		conflict = Convert.ToInt32(chk.ExecuteScalar() ?? 0);
+	}
+	if (conflict > 0)
+	{
+		txn.Rollback();
+		conn2.Close();
+		return Results.Conflict(new { error = "Time slot already booked for this space" });
 	}
 
-    try
+	try
 	{
 		using var cmd2 = conn2.CreateCommand();
+		cmd2.Transaction = txn;
 		cmd2.CommandText = "INSERT INTO Reservation (OwnerId, SpaceId, Starting_Date, Ending_Date, Date, StartHour, Hours, Status, Total_Amount) VALUES ($o,$sp,$s,$e,$d,$sh,$h,$st,$t); SELECT last_insert_rowid();";
 		cmd2.Parameters.AddWithValue("$o", ownerId);
 		cmd2.Parameters.AddWithValue("$sp", spaceId);
@@ -388,12 +392,30 @@ app.MapPost("/api/reservations", async (HttpContext http) =>
 		cmd2.Parameters.AddWithValue("$st", "Booked");
 		cmd2.Parameters.AddWithValue("$t", 0);
 		var id = Convert.ToInt32(cmd2.ExecuteScalar() ?? 0);
+		txn.Commit();
+		// fetch owner email + room name for confirmation email (best-effort)
+		string? ownerEmail = null; string? ownerName2 = null; string? roomName = null;
+		try
+		{
+			using var eq = conn2.CreateCommand();
+			eq.CommandText = "SELECT Email, Name FROM Users WHERE Id = $id";
+			eq.Parameters.AddWithValue("$id", ownerId);
+			using var er = eq.ExecuteReader();
+			if (er.Read()) { ownerEmail = er.IsDBNull(0) ? null : er.GetString(0); ownerName2 = er.IsDBNull(1) ? null : er.GetString(1); }
+			using var rq = conn2.CreateCommand();
+			rq.CommandText = "SELECT Name FROM Rooms WHERE ID = $id UNION SELECT Name FROM Spaces WHERE ID = $id LIMIT 1";
+			rq.Parameters.AddWithValue("$id", spaceId);
+			roomName = rq.ExecuteScalar()?.ToString();
+		}
+		catch { /* non-critical */ }
 		conn2.Close();
+		if (!string.IsNullOrEmpty(ownerEmail))
+			EmailHelper.SendBookingConfirmation(ownerEmail, ownerName2 ?? currentName ?? "Utilisateur", date.ToString("yyyy-MM-dd"), startHour, hours, roomName ?? $"Room #{spaceId}");
 		return Results.Created($"/api/reservations/{id}", new { id = id, ownerId = ownerId, start = start.ToString("o"), end = end.ToString("o"), date = date.ToString("yyyy-MM-dd"), startHour = startHour, hours = hours, spaceId = spaceId });
 	}
 	catch (Exception ex)
 	{
-		// log for diagnostics
+		txn.Rollback();
 		Console.Error.WriteLine($"Reservation insert failed: {ex.Message}\n{ex.StackTrace}");
 		conn2.Close();
 		var err = new { error = ex.Message, detail = ex.InnerException?.Message };
@@ -436,6 +458,199 @@ app.MapGet("/api/reservations/space", (HttpContext http, int spaceId, string? da
 	}
 	conn.Close();
 	return Results.Ok(list);
+}).RequireAuthorization();
+
+// Cancel a reservation (soft-delete: sets Status = 'Cancelled')
+app.MapDelete("/api/reservations/{id:int}", async (HttpContext http, int id) =>
+{
+	if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
+
+	using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = GetDbPath() }.ConnectionString);
+	conn.Open();
+
+	int ownerId = 0;
+	string? status = null;
+	using (var sel = conn.CreateCommand())
+	{
+		sel.CommandText = "SELECT OwnerId, Status FROM Reservation WHERE ID = $id";
+		sel.Parameters.AddWithValue("$id", id);
+		using var rdr = sel.ExecuteReader();
+		if (rdr.Read())
+		{
+			ownerId = rdr.IsDBNull(0) ? 0 : rdr.GetInt32(0);
+			status = rdr.IsDBNull(1) ? null : rdr.GetString(1);
+		}
+	}
+
+	if (ownerId == 0) { conn.Close(); return Results.NotFound(); }
+	if (status == "Cancelled") { conn.Close(); return Results.NoContent(); }
+
+	var callerName = http.User?.Identity?.Name ?? string.Empty;
+	int callerDbId = 0;
+	bool isAdmin = false;
+	using (var ucmd = conn.CreateCommand())
+	{
+		ucmd.CommandText = "SELECT Id, Role FROM Users WHERE Name = $n OR Email = $n LIMIT 1";
+		ucmd.Parameters.AddWithValue("$n", callerName);
+		using var rdr2 = ucmd.ExecuteReader();
+		if (rdr2.Read())
+		{
+			callerDbId = rdr2.IsDBNull(0) ? 0 : rdr2.GetInt32(0);
+			isAdmin = !rdr2.IsDBNull(1) && rdr2.GetString(1) == "Admin";
+		}
+	}
+
+	if (!isAdmin && callerDbId != ownerId) { conn.Close(); return Results.Forbid(); }
+
+	using (var del = conn.CreateCommand())
+	{
+		del.CommandText = "UPDATE Reservation SET Status = 'Cancelled' WHERE ID = $id";
+		del.Parameters.AddWithValue("$id", id);
+		del.ExecuteNonQuery();
+	}
+	conn.Close();
+	return Results.NoContent();
+}).RequireAuthorization();
+
+// ── User management (admin only) ──────────────────────────────────────────────
+app.MapGet("/api/users", (HttpContext http) =>
+{
+	if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
+	if (!http.User.IsInRole("Admin")) return Results.Forbid();
+	var list = new List<object>();
+	using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = GetDbPath() }.ConnectionString);
+	conn.Open();
+	using var cmd = conn.CreateCommand();
+	cmd.CommandText = "SELECT Id, Name, Last_Name, Email, Role FROM Users ORDER BY Id";
+	using var rdr = cmd.ExecuteReader();
+	while (rdr.Read())
+		list.Add(new { id = rdr.GetInt32(0), name = rdr.IsDBNull(1) ? "" : rdr.GetString(1), lastName = rdr.IsDBNull(2) ? "" : rdr.GetString(2), email = rdr.IsDBNull(3) ? "" : rdr.GetString(3), role = rdr.IsDBNull(4) ? "" : rdr.GetString(4) });
+	conn.Close();
+	return Results.Ok(list);
+}).RequireAuthorization();
+
+app.MapPost("/api/users", async (HttpContext http) =>
+{
+	if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
+	if (!http.User.IsInRole("Admin")) return Results.Forbid();
+	var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(http.Request.Body);
+	if (body == null || !body.TryGetValue("email", out var email) || string.IsNullOrWhiteSpace(email))
+		return Results.BadRequest(new { error = "Email required" });
+	if (!body.TryGetValue("password", out var password) || string.IsNullOrWhiteSpace(password))
+		return Results.BadRequest(new { error = "Password required" });
+	var name = body.TryGetValue("name", out var n) ? n ?? "" : "";
+	var lastName = body.TryGetValue("lastName", out var ln) ? ln ?? "" : "";
+	var role = body.TryGetValue("role", out var r) ? r ?? "User" : "User";
+	if (role != "Admin" && role != "User") role = "User";
+	var hash = DbHelpers.CreatePasswordHash(password);
+	using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = GetDbPath() }.ConnectionString);
+	conn.Open();
+	using var cmd = conn.CreateCommand();
+	cmd.CommandText = "INSERT INTO Users (Name, Last_Name, Email, Role, PasswordHash) VALUES ($n,$ln,$e,$r,$ph); SELECT last_insert_rowid();";
+	cmd.Parameters.AddWithValue("$n", name);
+	cmd.Parameters.AddWithValue("$ln", lastName);
+	cmd.Parameters.AddWithValue("$e", email);
+	cmd.Parameters.AddWithValue("$r", role);
+	cmd.Parameters.AddWithValue("$ph", hash);
+	try
+	{
+		var id = Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
+		conn.Close();
+		return Results.Created($"/api/users/{id}", new { id, name, lastName, email, role });
+	}
+	catch (SqliteException ex) when (ex.Message.Contains("UNIQUE"))
+	{
+		conn.Close();
+		return Results.Conflict(new { error = "Email already exists" });
+	}
+}).RequireAuthorization();
+
+app.MapDelete("/api/users/{id:int}", (HttpContext http, int id) =>
+{
+	if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
+	if (!http.User.IsInRole("Admin")) return Results.Forbid();
+	using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = GetDbPath() }.ConnectionString);
+	conn.Open();
+	using var cmd = conn.CreateCommand();
+	cmd.CommandText = "DELETE FROM Users WHERE Id = $id";
+	cmd.Parameters.AddWithValue("$id", id);
+	cmd.ExecuteNonQuery();
+	conn.Close();
+	return Results.NoContent();
+}).RequireAuthorization();
+
+app.MapPatch("/api/users/{id:int}/role", async (HttpContext http, int id) =>
+{
+	if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
+	if (!http.User.IsInRole("Admin")) return Results.Forbid();
+	var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(http.Request.Body);
+	if (body == null || !body.TryGetValue("role", out var role) || (role != "Admin" && role != "User"))
+		return Results.BadRequest(new { error = "role must be 'Admin' or 'User'" });
+	using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = GetDbPath() }.ConnectionString);
+	conn.Open();
+	using var cmd = conn.CreateCommand();
+	cmd.CommandText = "UPDATE Users SET Role = $r WHERE Id = $id";
+	cmd.Parameters.AddWithValue("$r", role);
+	cmd.Parameters.AddWithValue("$id", id);
+	cmd.ExecuteNonQuery();
+	conn.Close();
+	return Results.Ok(new { id, role });
+}).RequireAuthorization();
+
+// ── Resources (Ressources table) ───────────────────────────────────────────────
+app.MapGet("/api/resources", (HttpContext http) =>
+{
+	if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
+	var list = new List<object>();
+	using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = GetDbPath() }.ConnectionString);
+	conn.Open();
+	using var cmd = conn.CreateCommand();
+	cmd.CommandText = "SELECT ID, Name_ressource, Type_ressources, Capacity, Price FROM Ressources ORDER BY ID";
+	using var rdr = cmd.ExecuteReader();
+	while (rdr.Read())
+		list.Add(new { id = rdr.GetInt32(0), name = rdr.IsDBNull(1) ? "" : rdr.GetString(1), type = rdr.IsDBNull(2) ? "" : rdr.GetString(2), capacity = rdr.IsDBNull(3) ? 0 : rdr.GetInt32(3), price = rdr.IsDBNull(4) ? 0.0 : rdr.GetDouble(4) });
+	conn.Close();
+	return Results.Ok(list);
+}).RequireAuthorization();
+
+app.MapPost("/api/resources", async (HttpContext http) =>
+{
+	if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
+	if (!http.User.IsInRole("Admin")) return Results.Forbid();
+	var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, object>>(http.Request.Body);
+	if (body == null || !body.TryGetValue("name", out var nameObj) || string.IsNullOrWhiteSpace(nameObj?.ToString()))
+		return Results.BadRequest(new { error = "Name required" });
+	var name = nameObj!.ToString()!;
+	var type = body.TryGetValue("type", out var t) ? t?.ToString() ?? "" : "";
+	var capacity = 0;
+	if (body.TryGetValue("capacity", out var capObj)) int.TryParse(capObj?.ToString(), out capacity);
+	var price = 0.0;
+	if (body.TryGetValue("price", out var priceObj)) double.TryParse(priceObj?.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out price);
+	using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = GetDbPath() }.ConnectionString);
+	conn.Open();
+	using var cmd = conn.CreateCommand();
+	cmd.CommandText = "INSERT INTO Ressources (Name_ressource, Type_ressources, Capacity, Price) VALUES ($n,$t,$c,$p); SELECT last_insert_rowid();";
+	cmd.Parameters.AddWithValue("$n", name);
+	cmd.Parameters.AddWithValue("$t", type);
+	cmd.Parameters.AddWithValue("$c", capacity);
+	cmd.Parameters.AddWithValue("$p", price);
+	var id = Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
+	conn.Close();
+	return Results.Created($"/api/resources/{id}", new { id, name, type, capacity, price });
+}).RequireAuthorization();
+
+app.MapDelete("/api/resources/{id:int}", (HttpContext http, int id) =>
+{
+	if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
+	if (!http.User.IsInRole("Admin")) return Results.Forbid();
+	using var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = GetDbPath() }.ConnectionString);
+	conn.Open();
+	using var cmd = conn.CreateCommand();
+	cmd.CommandText = "DELETE FROM Ressources WHERE ID = $id";
+	cmd.Parameters.AddWithValue("$id", id);
+	cmd.ExecuteNonQuery();
+	conn.Close();
+	return Results.NoContent();
 }).RequireAuthorization();
 
 // Legacy HTML routes -> redirect to new Razor pages
@@ -604,10 +819,10 @@ CREATE TABLE IF NOT EXISTS Rooms (
 				cmd.CommandText = "SELECT COUNT(1) FROM Users WHERE Email = $email";
 				cmd.Parameters.AddWithValue("$email", "admin@example.com");
                 var exists = Convert.ToInt32(cmd.ExecuteScalar() ?? 0) > 0;
-				var password = "admin123"; // default admin password (change in production)
-				var hash = CreatePasswordHash(password);
 				if (!exists)
 				{
+						var password = "admin123"; // default admin password (change in production)
+						var hash = CreatePasswordHash(password);
 						using var insert = conn.CreateCommand();
 						insert.CommandText = "INSERT INTO Users (Name, Last_Name, Email, Role, PasswordHash) VALUES ($n,$ln,$email,$role,$ph)";
 						insert.Parameters.AddWithValue("$n", "Admin");
@@ -616,15 +831,6 @@ CREATE TABLE IF NOT EXISTS Rooms (
 						insert.Parameters.AddWithValue("$role", "Admin");
 						insert.Parameters.AddWithValue("$ph", hash);
 						insert.ExecuteNonQuery();
-				}
-				else
-				{
-						// Ensure existing admin has the requested default password
-						using var update = conn.CreateCommand();
-						update.CommandText = "UPDATE Users SET PasswordHash = $ph WHERE Email = $email";
-						update.Parameters.AddWithValue("$ph", hash);
-						update.Parameters.AddWithValue("$email", "admin@example.com");
-						update.ExecuteNonQuery();
 				}
 
 				conn.Close();
@@ -677,7 +883,7 @@ CREATE TABLE IF NOT EXISTS Rooms (
 			conn.Close();
 		}
 
-		static string CreatePasswordHash(string password)
+		public static string CreatePasswordHash(string password)
 		{
 				// PBKDF2 with HMACSHA256
 				var salt = new byte[16];
@@ -713,6 +919,46 @@ CREATE TABLE IF NOT EXISTS Rooms (
 			}
 		}
 
+}
+
+static class EmailHelper
+{
+	public static void SendBookingConfirmation(string toEmail, string toName, string date, int startHour, int hours, string roomName)
+	{
+		var host = Environment.GetEnvironmentVariable("SMTP_HOST");
+		if (string.IsNullOrEmpty(host)) return; // email not configured
+
+		var port = int.TryParse(Environment.GetEnvironmentVariable("SMTP_PORT"), out var p) ? p : 587;
+		var user = Environment.GetEnvironmentVariable("SMTP_USER");
+		var pass = Environment.GetEnvironmentVariable("SMTP_PASS");
+		var from = Environment.GetEnvironmentVariable("SMTP_FROM") ?? "noreply@cowork.local";
+		var useSsl = !string.Equals(Environment.GetEnvironmentVariable("SMTP_SSL"), "false", StringComparison.OrdinalIgnoreCase);
+
+		var subject = $"Confirmation de réservation — {roomName} le {date}";
+		var body = $@"Bonjour {toName},
+
+Votre réservation a bien été enregistrée.
+
+  Salle / Espace : {roomName}
+  Date           : {date}
+  Créneau        : {startHour}:00 — {startHour + hours}:00 ({hours}h)
+
+Merci d'utiliser CoWork Manager.
+";
+		try
+		{
+#pragma warning disable SYSLIB0006
+			using var smtp = new System.Net.Mail.SmtpClient(host, port) { EnableSsl = useSsl };
+			if (!string.IsNullOrEmpty(user))
+				smtp.Credentials = new System.Net.NetworkCredential(user, pass ?? "");
+			smtp.Send(from, toEmail, subject, body);
+#pragma warning restore SYSLIB0006
+		}
+		catch (Exception ex)
+		{
+			Console.Error.WriteLine($"[email] Failed to send confirmation to {toEmail}: {ex.Message}");
+		}
+	}
 }
 
 

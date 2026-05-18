@@ -1,5 +1,6 @@
 @page
 @{ Layout = "_Layout"; ViewData["Title"] = "Booking"; }
+<div id="bookingContainer">
   <div class="d-flex align-items-center gap-3 mb-3">
   <img src="~/images/Logo_1_mini.svg" asp-append-version="true" alt="Logo" style="height:36px" />
   <h1 class="h4 mb-3">Book a Room</h1>
@@ -40,6 +41,7 @@
           <div class="d-flex justify-content-between align-items-center mb-2">
             <div>
               <button id="prevWeek" class="btn btn-sm btn-outline-secondary">&larr;</button>
+              <button id="todayBtn" class="btn btn-sm btn-outline-primary">Today</button>
               <button id="nextWeek" class="btn btn-sm btn-outline-secondary">&rarr;</button>
             </div>
             <div class="fw-semibold" id="weekLabel">Week</div>
@@ -63,3 +65,4 @@
       </div>
     </div>
   </div>
+</div>
