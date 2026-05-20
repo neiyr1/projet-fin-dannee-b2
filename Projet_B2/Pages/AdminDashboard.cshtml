@@ -1,0 +1,91 @@
+@page
+@{ Layout = "_Layout"; ViewData["Title"] = "Dashboard"; }
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h4 mb-0"><i class="bi bi-speedometer2 me-2 text-primary"></i>Admin dashboard</h1>
+    <div class="text-muted small">Occupancy, revenue and top spaces at a glance.</div>
+  </div>
+  <a href="/api/admin/backup" class="btn btn-outline-dark btn-sm"><i class="bi bi-download me-1"></i>Backup DB</a>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-3"><div class="card stat-card"><div class="card-body"><div class="text-muted small">Bookings today</div><div class="fs-3 fw-bold" id="k-today">--</div></div></div></div>
+  <div class="col-md-3"><div class="card stat-card"><div class="card-body"><div class="text-muted small">Active bookings</div><div class="fs-3 fw-bold text-success" id="k-active">--</div></div></div></div>
+  <div class="col-md-3"><div class="card stat-card"><div class="card-body"><div class="text-muted small">Cancelled</div><div class="fs-3 fw-bold text-secondary" id="k-cancel">--</div></div></div></div>
+  <div class="col-md-3"><div class="card stat-card"><div class="card-body"><div class="text-muted small">Revenue TTC</div><div class="fs-3 fw-bold text-primary" id="k-revenue">--</div></div></div></div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-4">
+    <div class="card h-100"><div class="card-body">
+      <h6 class="text-muted text-uppercase small mb-2">Occupancy (last 7 days)</h6>
+      <div class="fs-1 fw-bold" id="k-occ">--</div>
+      <div class="text-muted small">Used hours / weekly capacity</div>
+      <div class="progress mt-2" style="height:10px"><div class="progress-bar" id="occ-bar" style="width:0%"></div></div>
+    </div></div>
+  </div>
+  <div class="col-md-4">
+    <div class="card h-100"><div class="card-body">
+      <h6 class="text-muted text-uppercase small mb-2">Users / Spaces</h6>
+      <div class="d-flex justify-content-between">
+        <div><div class="fs-3 fw-bold" id="k-users">--</div><div class="text-muted small">Users</div></div>
+        <div><div class="fs-3 fw-bold" id="k-spaces">--</div><div class="text-muted small">Spaces</div></div>
+        <div><div class="fs-3 fw-bold" id="k-invoices">--</div><div class="text-muted small">Invoices</div></div>
+      </div>
+    </div></div>
+  </div>
+  <div class="col-md-4">
+    <div class="card h-100"><div class="card-body">
+      <h6 class="text-muted text-uppercase small mb-2">Quick admin links</h6>
+      <div class="d-grid gap-2">
+        <a href="/AdminReservations" class="btn btn-sm btn-outline-primary text-start"><i class="bi bi-clipboard-check me-2"></i>All reservations</a>
+        <a href="/AdminUsers" class="btn btn-sm btn-outline-primary text-start"><i class="bi bi-people me-2"></i>Users</a>
+        <a href="/AdminAudit" class="btn btn-sm btn-outline-primary text-start"><i class="bi bi-journal-text me-2"></i>Audit log</a>
+        <a href="/AdminAccess" class="btn btn-sm btn-outline-primary text-start"><i class="bi bi-shield-check me-2"></i>QR access control</a>
+      </div>
+    </div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <h6 class="text-muted text-uppercase small mb-2">Top spaces by usage</h6>
+    <table class="table table-sm align-middle mb-0" id="top-table">
+      <thead><tr><th>Space</th><th class="text-end">Bookings</th><th class="text-end">Hours</th><th>Usage</th></tr></thead>
+      <tbody><tr><td colspan="4" class="text-center text-muted">Loading...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(async function(){
+  const res = await fetch('/api/admin/dashboard', { credentials: 'include' });
+  if (res.status === 401) { location.href = '/Login'; return; }
+  if (res.status === 403) { document.querySelector('.container').innerHTML = '<div class="alert alert-danger">Admin role required.</div>'; return; }
+  const d = await res.json();
+  document.getElementById('k-today').textContent = d.totals.bookingsToday;
+  document.getElementById('k-active').textContent = d.totals.bookingsActive;
+  document.getElementById('k-cancel').textContent = d.totals.bookingsCancelled;
+  document.getElementById('k-revenue').textContent = (d.revenue.ttc || 0).toFixed(2) + ' €';
+  document.getElementById('k-occ').textContent = d.occupancyWeek + '%';
+  document.getElementById('occ-bar').style.width = Math.min(100, d.occupancyWeek) + '%';
+  document.getElementById('k-users').textContent = d.totals.users;
+  document.getElementById('k-spaces').textContent = d.totals.spaces;
+  document.getElementById('k-invoices').textContent = d.revenue.invoicesCount;
+
+  const tbody = document.querySelector('#top-table tbody');
+  tbody.innerHTML = '';
+  const max = Math.max(1, ...d.topSpaces.map(s => s.bookings));
+  for (const s of d.topSpaces){
+    const pct = Math.round((s.bookings / max) * 100);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><strong>${s.name}</strong></td>
+      <td class="text-end">${s.bookings}</td>
+      <td class="text-end">${s.hours}h</td>
+      <td><div class="progress" style="height:8px"><div class="progress-bar bg-primary" style="width:${pct}%"></div></div></td>`;
+    tbody.appendChild(tr);
+  }
+  if (!d.topSpaces.length) tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No data yet.</td></tr>';
+})();
+</script>
