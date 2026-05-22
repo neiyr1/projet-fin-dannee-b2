@@ -1,0 +1,48 @@
+@page
+@{ Layout = "_Layout"; ViewData["Title"] = "Access control"; }
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h4 mb-0"><i class="bi bi-shield-check me-2 text-success"></i>Access control</h1>
+    <div class="text-muted small">Front desk: paste a QR token to validate an entry pass.</div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-md-6">
+    <div class="card mb-3">
+      <div class="card-body">
+        <label class="form-label">Scan / paste a QR token</label>
+        <div class="input-group">
+          <span class="input-group-text"><i class="bi bi-qr-code"></i></span>
+          <input type="text" id="token" class="form-control" placeholder="paste token here" autofocus />
+          <button id="verify" class="btn btn-primary"><i class="bi bi-check2-square me-1"></i>Verify</button>
+        </div>
+        <div class="form-text">Tokens are embedded inside the QR image attached to the booking invoice.</div>
+      </div>
+    </div>
+
+    <div id="result"></div>
+  </div>
+</div>
+
+<script>
+document.getElementById('verify').addEventListener('click', async () => {
+  const token = document.getElementById('token').value.trim();
+  const result = document.getElementById('result');
+  if (!token) return;
+  const res = await fetch('/api/access/verify', { method: 'POST', headers: {'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ token }) });
+  if (res.status === 401) { location.href = '/Login'; return; }
+  if (res.status === 403) { result.innerHTML = '<div class="alert alert-danger">Admin or front-desk role required.</div>'; return; }
+  const data = await res.json();
+  if (data.granted){
+    result.innerHTML = `<div class="alert alert-success"><h5 class="mb-2"><i class="bi bi-check-circle me-2"></i>Access granted</h5>
+      <div><strong>${data.owner}</strong> at <strong>${data.space}</strong></div>
+      <div class="small text-muted">${new Date(data.start).toLocaleString()} → ${new Date(data.end).toLocaleString()}</div></div>`;
+  } else {
+    result.innerHTML = `<div class="alert alert-danger"><h5 class="mb-2"><i class="bi bi-x-circle me-2"></i>Access denied</h5>
+      <div class="small">${data.reason || 'Outside booking window or cancelled.'}</div></div>`;
+  }
+});
+document.getElementById('token').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('verify').click(); });
+</script>

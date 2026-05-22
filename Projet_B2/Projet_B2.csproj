@@ -9,6 +9,9 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="6.0.15" />
+    <PackageReference Include="QuestPDF" Version="2026.5.0" />
+    <PackageReference Include="MailKit" Version="4.16.0" />
+    <PackageReference Include="QRCoder" Version="1.6.0" />
   </ItemGroup>
 
 </Project>
