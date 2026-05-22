@@ -1,0 +1,196 @@
+@page
+@{ Layout = "_Layout"; ViewData["Title"] = "Users"; }
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h4 mb-0"><i class="bi bi-people me-2 text-info"></i>User management</h1>
+    <div class="text-muted small">Admins only · roles, passwords and access control.</div>
+  </div>
+  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newUserModal">
+    <i class="bi bi-person-plus me-1"></i>New user
+  </button>
+</div>
+
+<div class="card">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>#</th><th>Name</th><th>Email</th><th>Role</th><th>Bookings</th><th class="text-end pe-3">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="usersBody">
+          <tr><td colspan="6" class="text-center text-muted py-4">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- New user modal -->
+<div class="modal fade" id="newUserModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="newUserForm">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-person-plus me-2 text-primary"></i>Create user</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Name</label>
+            <input name="name" class="form-control" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Email</label>
+            <input name="email" type="email" class="form-control" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Role</label>
+            <select name="role" class="form-select">
+              <option value="User">User</option>
+              <option value="Member">Member</option>
+              <option value="Accueil">Front desk (Accueil)</option>
+              <option value="Comptabilite">Accountant</option>
+              <option value="Admin">Admin</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Initial password</label>
+            <input name="password" class="form-control" minlength="6" placeholder="changeme123" />
+            <div class="form-text">Leave blank for default <code>changeme123</code>.</div>
+          </div>
+          <div id="newUserMsg" class="text-danger small"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Reset password modal -->
+<div class="modal fade" id="resetPwdModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <form id="resetPwdForm">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-key me-2 text-warning"></i>Reset password</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-2 small text-muted">User <strong id="resetPwdLabel"></strong></div>
+          <input name="password" type="text" class="form-control" minlength="6" required placeholder="New password" />
+          <input type="hidden" name="id" />
+          <div id="resetPwdMsg" class="text-danger small mt-2"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-warning">Reset</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const tbody = document.getElementById('usersBody');
+  const roleBadge = role => {
+    const map = { Admin: 'bg-danger', Comptabilite: 'bg-info text-dark', Accueil: 'bg-warning text-dark', Member: 'bg-primary', User: 'bg-secondary' };
+    return `<span class="badge ${map[role] || 'bg-secondary'}">${role || '—'}</span>`;
+  };
+
+  async function load(){
+    const res = await fetch('/api/users', { credentials: 'include' });
+    if (res.status === 401) { location.href = '/Login'; return; }
+    if (res.status === 403) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-4">Admin role required.</td></tr>';
+      return;
+    }
+    const items = await res.json();
+    if (!items.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No users.</td></tr>'; return; }
+    tbody.innerHTML = '';
+    for (const u of items){
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="text-muted">#${u.id}</td>
+        <td><strong>${u.name || ''}</strong>${u.lastName ? ' ' + u.lastName : ''}</td>
+        <td>${u.email || '<span class="text-muted">—</span>'}</td>
+        <td>
+          <select class="form-select form-select-sm role-select" data-id="${u.id}" style="width:auto;display:inline-block">
+            ${['User','Member','Accueil','Comptabilite','Admin'].map(r => `<option value="${r}" ${u.role===r?'selected':''}>${r}</option>`).join('')}
+          </select>
+          <span class="ms-2">${roleBadge(u.role)}</span>
+        </td>
+        <td><span class="badge bg-light text-dark border">${u.bookings}</span></td>
+        <td class="text-end pe-3">
+          <button class="btn btn-sm btn-outline-warning reset-btn" data-id="${u.id}" data-label="${u.name || u.email}"><i class="bi bi-key"></i></button>
+          <button class="btn btn-sm btn-outline-danger del-btn" data-id="${u.id}" data-label="${u.name || u.email}"><i class="bi bi-trash"></i></button>
+        </td>`;
+      tbody.appendChild(tr);
+    }
+
+    tbody.querySelectorAll('.role-select').forEach(sel => sel.addEventListener('change', async (e)=>{
+      const id = e.target.dataset.id; const role = e.target.value;
+      const r = await fetch(`/api/users/${id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify({ role }) });
+      if (!r.ok) { alert('Update failed'); load(); }
+      else load();
+    }));
+
+    tbody.querySelectorAll('.del-btn').forEach(b => b.addEventListener('click', async ()=>{
+      if (!confirm(`Delete user "${b.dataset.label}"?`)) return;
+      const r = await fetch(`/api/users/${b.dataset.id}`, { method: 'DELETE', credentials: 'include' });
+      if (!r.ok) {
+        const j = await r.json().catch(()=>null);
+        alert(j?.error || 'Delete failed');
+      }
+      load();
+    }));
+
+    tbody.querySelectorAll('.reset-btn').forEach(b => b.addEventListener('click', ()=>{
+      const form = document.getElementById('resetPwdForm');
+      form.querySelector('input[name=id]').value = b.dataset.id;
+      document.getElementById('resetPwdLabel').textContent = b.dataset.label;
+      form.querySelector('input[name=password]').value = '';
+      document.getElementById('resetPwdMsg').textContent = '';
+      new bootstrap.Modal(document.getElementById('resetPwdModal')).show();
+    }));
+  }
+
+  document.getElementById('newUserForm').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = { name: fd.get('name'), email: fd.get('email'), role: fd.get('role'), password: fd.get('password') };
+    const res = await fetch('/api/users', { method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify(payload) });
+    const msg = document.getElementById('newUserMsg');
+    if (res.ok) {
+      e.target.reset();
+      bootstrap.Modal.getInstance(document.getElementById('newUserModal'))?.hide();
+      load();
+    } else {
+      const j = await res.json().catch(()=>null);
+      msg.textContent = j?.error || 'Create failed';
+    }
+  });
+
+  document.getElementById('resetPwdForm').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const id = fd.get('id');
+    const res = await fetch(`/api/users/${id}/reset-password`, { method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify({ password: fd.get('password') }) });
+    const msg = document.getElementById('resetPwdMsg');
+    if (res.ok) {
+      bootstrap.Modal.getInstance(document.getElementById('resetPwdModal'))?.hide();
+    } else {
+      const j = await res.json().catch(()=>null);
+      msg.textContent = j?.error || 'Reset failed';
+    }
+  });
+
+  load();
+})();
+</script>
