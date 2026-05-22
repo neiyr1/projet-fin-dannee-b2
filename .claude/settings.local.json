@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git rebase *)",
+      "Bash(git checkout *)",
+      "Bash(git pull *)",
+      "Bash(dotnet build *)",
+      "Bash(git ls-files *)",
+      "Bash(git check-ignore *)",
+      "Bash(sqlite3 data/app.db \"PRAGMA table_info\\(Users\\);\")"
+    ]
+  }
+}

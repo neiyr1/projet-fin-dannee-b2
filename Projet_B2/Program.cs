@@ -113,7 +113,7 @@ app.MapGet("/api/me", (ClaimsPrincipal user) =>
     return Results.Ok(new { user = user.Identity?.Name, role });
 });
 
-app.MapPost("/api/signup", async (HttpContext http) =>
+app.MapPost("/api/signup", async (HttpContext http, EmailService emailSvc, ILogger<Program> logger) =>
 {
     var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(http.Request.Body);
     if (body == null) return Results.BadRequest(new { error = "Invalid payload" });
@@ -141,19 +141,43 @@ app.MapPost("/api/signup", async (HttpContext http) =>
             return Results.Conflict(new { error = "Email already registered" });
     }
 
+    var verifyToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
     using var ins = conn.CreateCommand();
-    ins.CommandText = "INSERT INTO Users (Name, Email, Role, PasswordHash) VALUES ($n,$e,$r,$ph); SELECT last_insert_rowid();";
+    ins.CommandText = "INSERT INTO Users (Name, Email, Role, PasswordHash, EmailVerified, EmailVerifyToken) VALUES ($n,$e,$r,$ph,0,$tok); SELECT last_insert_rowid();";
     ins.Parameters.AddWithValue("$n", name);
     ins.Parameters.AddWithValue("$e", email);
     ins.Parameters.AddWithValue("$r", "User");
     ins.Parameters.AddWithValue("$ph", DbHelpers.CreatePasswordHash(password));
+    ins.Parameters.AddWithValue("$tok", verifyToken);
     var id = Convert.ToInt32(ins.ExecuteScalar() ?? 0);
 
     var claims = new[] { new Claim(ClaimTypes.Name, name), new Claim(ClaimTypes.Role, "User") };
     var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
     await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
+
+    var verifyUrl = $"{http.Request.Scheme}://{http.Request.Host}/api/verify-email?token={verifyToken}";
+    try { await emailSvc.SendWelcomeAsync(email, name, verifyUrl); }
+    catch (Exception ex) { logger.LogWarning(ex, "Welcome email failed for {Email}", email); }
+
     return Results.Created($"/api/users/{id}", new { id, name, email, role = "User" });
 });
+
+app.MapGet("/api/verify-email", (string? token) =>
+{
+    if (string.IsNullOrWhiteSpace(token))
+        return Results.Content("<html><body style='font-family:sans-serif;padding:40px'><h2>Invalid verification link</h2></body></html>", "text/html");
+
+    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var cmd = conn.CreateCommand();
+    cmd.CommandText = "UPDATE Users SET EmailVerified = 1, EmailVerifyToken = NULL WHERE EmailVerifyToken = $tok";
+    cmd.Parameters.AddWithValue("$tok", token);
+    var updated = cmd.ExecuteNonQuery();
+
+    if (updated == 0)
+        return Results.Content("<html><body style='font-family:sans-serif;padding:40px'><h2>This verification link is invalid or has already been used.</h2><p><a href='/'>Continue</a></p></body></html>", "text/html");
+
+    return Results.Content("<html><body style='font-family:sans-serif;padding:40px'><h2 style='color:#1e40af'>Your email has been verified.</h2><p>Thank you!</p><p><a href='/'>Continue to the app</a></p></body></html>", "text/html");
+}).AllowAnonymous();
 
 // --- Admin: Users management ---
 
@@ -164,7 +188,8 @@ app.MapGet("/api/users", (HttpContext http) =>
     using var conn = DbHelpers.OpenConnection(GetDbPath());
     using var cmd = conn.CreateCommand();
     cmd.CommandText = @"SELECT u.Id, u.Name, u.Last_Name, u.Email, u.Role,
-                               (SELECT COUNT(1) FROM Reservation r WHERE r.OwnerId = u.Id) AS BookingsCount
+                               (SELECT COUNT(1) FROM Reservation r WHERE r.OwnerId = u.Id) AS BookingsCount,
+                               COALESCE(u.EmailVerified, 0) AS EmailVerified
                         FROM Users u ORDER BY u.Id";
     using var rdr = cmd.ExecuteReader();
     while (rdr.Read())
@@ -175,10 +200,58 @@ app.MapGet("/api/users", (HttpContext http) =>
             lastName = rdr.IsDBNull(2) ? null : rdr.GetString(2),
             email = rdr.IsDBNull(3) ? null : rdr.GetString(3),
             role = rdr.IsDBNull(4) ? null : rdr.GetString(4),
-            bookings = rdr.IsDBNull(5) ? 0 : rdr.GetInt32(5)
+            bookings = rdr.IsDBNull(5) ? 0 : rdr.GetInt32(5),
+            emailVerified = !rdr.IsDBNull(6) && rdr.GetInt32(6) == 1
         });
     }
     return Results.Ok(list);
+}).RequireAuthorization();
+
+app.MapPost("/api/users/{id:int}/verify-email", (HttpContext http, int id) =>
+{
+    if (!http.User.IsInRole("Admin")) return Results.Forbid();
+    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var cmd = conn.CreateCommand();
+    cmd.CommandText = "UPDATE Users SET EmailVerified = 1, EmailVerifyToken = NULL WHERE Id = $id";
+    cmd.Parameters.AddWithValue("$id", id);
+    var rows = cmd.ExecuteNonQuery();
+    return rows == 0 ? Results.NotFound() : Results.Ok(new { id, emailVerified = true });
+}).RequireAuthorization();
+
+app.MapPost("/api/users/{id:int}/resend-welcome", async (HttpContext http, int id, EmailService emailSvc, ILogger<Program> logger) =>
+{
+    if (!http.User.IsInRole("Admin")) return Results.Forbid();
+    using var conn = DbHelpers.OpenConnection(GetDbPath());
+
+    string? email = null, name = null;
+    using (var sel = conn.CreateCommand())
+    {
+        sel.CommandText = "SELECT Name, Email FROM Users WHERE Id = $id";
+        sel.Parameters.AddWithValue("$id", id);
+        using var r = sel.ExecuteReader();
+        if (!r.Read()) return Results.NotFound();
+        name = r.IsDBNull(0) ? null : r.GetString(0);
+        email = r.IsDBNull(1) ? null : r.GetString(1);
+    }
+    if (string.IsNullOrWhiteSpace(email)) return Results.BadRequest(new { error = "User has no email" });
+
+    var token = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+    using (var upd = conn.CreateCommand())
+    {
+        upd.CommandText = "UPDATE Users SET EmailVerifyToken = $tok WHERE Id = $id";
+        upd.Parameters.AddWithValue("$tok", token);
+        upd.Parameters.AddWithValue("$id", id);
+        upd.ExecuteNonQuery();
+    }
+
+    var verifyUrl = $"{http.Request.Scheme}://{http.Request.Host}/api/verify-email?token={token}";
+    try { await emailSvc.SendWelcomeAsync(email, name ?? "", verifyUrl); }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Resend welcome failed for {Email}", email);
+        return Results.Problem("Email could not be sent");
+    }
+    return Results.Ok(new { id });
 }).RequireAuthorization();
 
 app.MapPost("/api/users", async (HttpContext http) =>
