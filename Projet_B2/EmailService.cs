@@ -16,6 +16,24 @@ public class EmailService
         Directory.CreateDirectory(_outboxDir);
     }
 
+    public Task SendWelcomeAsync(string toEmail, string toName, string? verifyUrl)
+    {
+        var safeName = System.Net.WebUtility.HtmlEncode(toName ?? "");
+        var verifyBlock = string.IsNullOrEmpty(verifyUrl) ? "" : $@"
+  <p>To confirm your email address (optional), click the button below:</p>
+  <p><a href='{verifyUrl}' style='display:inline-block;padding:10px 16px;background:#1e40af;color:#fff;text-decoration:none;border-radius:4px'>Confirm my email</a></p>
+  <p style='color:#888;font-size:12px'>Or copy this link: {verifyUrl}</p>";
+        var html = $@"<div style='font-family:Segoe UI,Arial,sans-serif;color:#222'>
+  <h2 style='color:#1e40af'>Welcome to CoWork Manager</h2>
+  <p>Hello {safeName},</p>
+  <p>Your account has been created successfully. You can now sign in and book workspaces, meeting rooms and conference rooms.</p>{verifyBlock}
+  <p style='color:#888;font-size:12px;margin-top:24px'>This is an automated message from CoWork Manager.</p>
+</div>";
+        var text = $"Welcome {toName}!\nYour account is ready." + (string.IsNullOrEmpty(verifyUrl) ? "" : $"\nConfirm your email: {verifyUrl}");
+        var slug = $"WELCOME-{toEmail}";
+        return SendAsync(toEmail, toName, "Welcome to CoWork Manager", html, text, null, slug);
+    }
+
     public Task SendBookingConfirmationAsync(string toEmail, string toName, InvoiceData invoice, string pdfAttachmentPath)
     {
         var slots = string.Join("", invoice.Lines.Select(l =>

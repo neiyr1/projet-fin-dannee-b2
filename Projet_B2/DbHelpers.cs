@@ -236,22 +236,32 @@ CREATE TABLE IF NOT EXISTS Reminders (
         using var pragma = conn.CreateCommand();
         pragma.CommandText = "PRAGMA table_info(Users);";
         using var rdr = pragma.ExecuteReader();
-        var hasPasswordHash = false;
+        var has = new Dictionary<string, bool>
+        {
+            ["passwordhash"] = false, ["emailverified"] = false, ["emailverifytoken"] = false
+        };
         while (rdr.Read())
         {
-            var colName = rdr.IsDBNull(1) ? string.Empty : rdr.GetString(1);
-            if (string.Equals(colName, "PasswordHash", StringComparison.OrdinalIgnoreCase))
-            {
-                hasPasswordHash = true;
-                break;
-            }
+            var col = (rdr.IsDBNull(1) ? string.Empty : rdr.GetString(1)).ToLowerInvariant();
+            if (has.ContainsKey(col)) has[col] = true;
         }
         rdr.Close();
-        if (!hasPasswordHash)
+
+        var migrations = new Dictionary<string, string>
         {
-            using var alter = conn.CreateCommand();
-            alter.CommandText = "ALTER TABLE Users ADD COLUMN PasswordHash TEXT;";
-            alter.ExecuteNonQuery();
+            ["passwordhash"] = "ALTER TABLE Users ADD COLUMN PasswordHash TEXT;",
+            ["emailverified"] = "ALTER TABLE Users ADD COLUMN EmailVerified INTEGER NOT NULL DEFAULT 0;",
+            ["emailverifytoken"] = "ALTER TABLE Users ADD COLUMN EmailVerifyToken TEXT;"
+        };
+
+        foreach (var (key, sql) in migrations)
+        {
+            if (!has[key])
+            {
+                using var alter = conn.CreateCommand();
+                alter.CommandText = sql;
+                alter.ExecuteNonQuery();
+            }
         }
     }
 
