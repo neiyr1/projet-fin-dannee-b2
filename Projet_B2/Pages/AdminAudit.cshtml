@@ -1,10 +1,10 @@
 @page
 @{ Layout = "_Layout"; ViewData["Title"] = "Audit"; }
 
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="page-heading">
   <div>
-    <h1 class="h4 mb-0"><i class="bi bi-journal-text me-2 text-info"></i>Audit log</h1>
-    <div class="text-muted small">Latest 200 actions tracked by the platform.</div>
+    <h1 class="h4 mb-0"><i class="bi bi-journal-text me-2 text-info"></i>Journal d'audit</h1>
+    <div class="text-muted small">Dernieres actions tracees par la plateforme.</div>
   </div>
   <button id="refresh" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-clockwise"></i></button>
 </div>
@@ -14,9 +14,9 @@
     <div class="table-responsive">
       <table class="table table-hover align-middle mb-0">
         <thead class="table-light">
-          <tr><th style="width:170px">Timestamp</th><th>User</th><th>Action</th><th>Target</th><th>Details</th></tr>
+          <tr><th style="width:170px">Date</th><th>Utilisateur</th><th>Action</th><th>Cible</th><th>Details</th></tr>
         </thead>
-        <tbody id="body"><tr><td colspan="5" class="text-center text-muted py-4">Loading...</td></tr></tbody>
+        <tbody id="body"><tr><td colspan="5" class="text-center text-muted py-4">Chargement...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -29,19 +29,19 @@
     const map = { BookingCreate: 'bg-success', BookingCancel: 'bg-secondary', BookingModify: 'bg-warning text-dark',
                   AccessGranted: 'bg-success', AccessDenied: 'bg-danger', ReminderSent: 'bg-info text-dark',
                   CartCheckout: 'bg-primary', BackupDownload: 'bg-dark' };
-    return `<span class="badge ${map[a] || 'bg-light text-dark border'}">${a || '—'}</span>`;
+      return `<span class="badge ${map[a] || 'bg-light text-dark border'}">${a || '-'}</span>`;
   }
   async function load(){
     const res = await fetch('/api/admin/audit', { credentials: 'include' });
     if (res.status === 401) { location.href = '/Login'; return; }
-    if (res.status === 403) { body.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-4">Admin role required.</td></tr>'; return; }
+    if (res.status === 403) { body.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-4">Role admin requis.</td></tr>'; return; }
     const items = await res.json();
-    if (!items.length) { body.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No entries.</td></tr>'; return; }
+    if (!items.length) { body.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Aucune entree.</td></tr>'; return; }
     body.innerHTML = '';
     for (const i of items){
       const tr = document.createElement('tr');
       tr.innerHTML = `<td class="text-muted small">${i.timestamp ? new Date(i.timestamp).toLocaleString() : ''}</td>
-        <td>${i.user || '<span class="text-muted">—</span>'}</td>
+          <td>${i.user || '<span class="text-muted">-</span>'}</td>
         <td>${actionBadge(i.action)}</td>
         <td><code>${i.target || ''}</code></td>
         <td class="small text-muted">${i.details || ''}</td>`;

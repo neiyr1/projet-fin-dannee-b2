@@ -1,37 +1,37 @@
 @page
-@{ Layout = "_Layout"; ViewData["Title"] = "Login"; }
+@{ Layout = "_Layout"; ViewData["Title"] = "Connexion"; }
 
 <div class="d-flex justify-content-center align-items-center" style="min-height:65vh">
   <div class="card shadow" style="max-width:400px;width:100%">
     <div class="card-body p-4">
       <div class="text-center mb-4">
-        <img src="~/images/Logo_1_mini.svg" asp-append-version="true" alt="CoWork Manager" style="height:48px" class="mb-2" />
-        <h4 class="fw-bold mt-2">Welcome back</h4>
-        <p class="text-muted small mb-0">Sign in to manage spaces and bookings</p>
+        <img src="~/images/Logo_1_mini.svg" asp-append-version="true" alt="Laceris Tech" style="height:48px" class="mb-2" />
+        <h4 class="fw-bold mt-2">Connexion</h4>
+        <p class="text-muted small mb-0">Accedez a vos espaces et reservations</p>
       </div>
 
       <form id="loginForm">
         <div class="mb-3">
-          <label class="form-label fw-medium">Username or Email</label>
+          <label class="form-label fw-medium">Nom d'utilisateur ou email</label>
           <div class="input-group">
             <span class="input-group-text"><i class="bi bi-person"></i></span>
             <input name="username" class="form-control" required autocomplete="username" placeholder="admin@example.com" />
           </div>
         </div>
         <div class="mb-3">
-          <label class="form-label fw-medium">Password</label>
+          <label class="form-label fw-medium">Mot de passe</label>
           <div class="input-group">
             <span class="input-group-text"><i class="bi bi-lock"></i></span>
-            <input name="password" type="password" class="form-control" required autocomplete="current-password" placeholder="Enter your password" />
+            <input name="password" type="password" class="form-control" required autocomplete="current-password" placeholder="Votre mot de passe" />
           </div>
         </div>
         <div id="msg" class="text-danger small mb-2"></div>
         <button type="submit" class="btn btn-primary w-100" id="loginBtn">
-          <span id="loginBtnText">Sign in</span>
+          <span id="loginBtnText">Se connecter</span>
           <span id="loginSpinner" class="spinner-border spinner-border-sm ms-2" style="display:none" role="status"></span>
         </button>
         <div class="text-center mt-3 text-muted small">
-          New here? <a href="/Signup">Create an account</a>
+          Nouveau ici ? <a href="/Signup">Creer un compte</a>
         </div>
       </form>
     </div>
