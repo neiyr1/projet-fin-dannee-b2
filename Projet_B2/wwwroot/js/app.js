@@ -8,6 +8,23 @@ async function postJson(url, data) {
   return res;
 }
 
+function applyAdminMenu(adminMenu, role) {
+  if (!adminMenu) return;
+  const items = adminMenu.querySelectorAll('[data-roles]');
+  let visibleCount = 0;
+  items.forEach(li => {
+    const allowed = li.dataset.roles.split(',');
+    const show = allowed.includes(role);
+    li.style.display = show ? '' : 'none';
+    if (show) visibleCount++;
+  });
+  adminMenu.style.display = visibleCount > 0 ? '' : 'none';
+  const label = document.getElementById('adminMenuLabel');
+  if (label) {
+    label.textContent = role === 'Comptabilite' ? 'Comptabilité' : (role === 'Accueil' ? 'Accueil' : 'Admin');
+  }
+}
+
 async function refreshUser() {
   try {
     const res = await fetch('/api/me', { credentials: 'include' });
@@ -27,7 +44,7 @@ async function refreshUser() {
       username.textContent = data.user || '';
       if (userRole) userRole.textContent = data.role || 'User';
       if (userChip) userChip.style.display = 'inline-flex';
-      if (adminMenu) adminMenu.style.display = (data.role === 'Admin') ? '' : 'none';
+      applyAdminMenu(adminMenu, data.role || '');
     } else {
       loginLink.style.display = 'inline-flex';
       if (signupLink) signupLink.style.display = 'inline-flex';

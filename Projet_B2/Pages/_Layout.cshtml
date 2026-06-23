@@ -54,16 +54,16 @@
           </li>
           <li class="nav-item dropdown" id="adminMenu" style="display:none">
             <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
-              <i class="bi bi-shield-lock me-1"></i>Admin
+              <i class="bi bi-shield-lock me-1"></i><span id="adminMenuLabel">Admin</span>
             </a>
             <ul class="dropdown-menu shadow-sm">
-              <li><a class="dropdown-item" href="/AdminDashboard"><i class="bi bi-speedometer2 me-2"></i>Dashboard</a></li>
-              <li><a class="dropdown-item" href="/AdminUsers"><i class="bi bi-people me-2"></i>Users</a></li>
-              <li><a class="dropdown-item" href="/AdminReservations"><i class="bi bi-clipboard-check me-2"></i>All bookings</a></li>
-              <li><a class="dropdown-item" href="/AdminAudit"><i class="bi bi-journal-text me-2"></i>Audit log</a></li>
-              <li><a class="dropdown-item" href="/AdminAccess"><i class="bi bi-shield-check me-2"></i>QR access control</a></li>
-              <li><hr class="dropdown-divider"></li>
-              <li><a class="dropdown-item" href="/api/admin/backup"><i class="bi bi-download me-2"></i>Backup database</a></li>
+              <li data-roles="Admin,Comptabilite"><a class="dropdown-item" href="/AdminDashboard"><i class="bi bi-speedometer2 me-2"></i>Dashboard</a></li>
+              <li data-roles="Admin"><a class="dropdown-item" href="/AdminUsers"><i class="bi bi-people me-2"></i>Users</a></li>
+              <li data-roles="Admin,Comptabilite"><a class="dropdown-item" href="/AdminReservations"><i class="bi bi-clipboard-check me-2"></i>All bookings</a></li>
+              <li data-roles="Admin"><a class="dropdown-item" href="/AdminAudit"><i class="bi bi-journal-text me-2"></i>Audit log</a></li>
+              <li data-roles="Admin,Accueil"><a class="dropdown-item" href="/AdminAccess"><i class="bi bi-shield-check me-2"></i>QR access control</a></li>
+              <li data-roles="Admin"><hr class="dropdown-divider"></li>
+              <li data-roles="Admin"><a class="dropdown-item" href="/api/admin/backup"><i class="bi bi-download me-2"></i>Backup database</a></li>
             </ul>
           </li>
         </ul>

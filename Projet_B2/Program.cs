@@ -370,7 +370,7 @@ app.MapDelete("/api/users/{id:int}", (HttpContext http, int id) =>
 
 app.MapGet("/api/reservations/all", (HttpContext http, string? status, string? from, string? to) =>
 {
-    if (!http.User.IsInRole("Admin")) return Results.Forbid();
+    if (!(http.User.IsInRole("Admin") || http.User.IsInRole("Comptabilite"))) return Results.Forbid();
     using var conn = DbHelpers.OpenConnection(GetDbPath());
     using var cmd = conn.CreateCommand();
     var sql = @"SELECT r.ID, r.Date, r.StartHour, r.Hours, r.Status, r.Total_Amount,
@@ -567,19 +567,25 @@ app.MapPost("/api/reservations", async (HttpContext http, InvoiceService invoice
 
     using var conn = DbHelpers.OpenConnection(GetDbPath());
 
-    // Lookup space + price
+    // Lookup space + price + capacity
     double pricePerHour = 0;
     string spaceName = string.Empty;
+    int spaceCapacity = 0;
     using (var sc = conn.CreateCommand())
     {
-        sc.CommandText = "SELECT Name, PricePerHour FROM Spaces WHERE ID = $id LIMIT 1";
+        sc.CommandText = "SELECT Name, PricePerHour, Capacity FROM Spaces WHERE ID = $id LIMIT 1";
         sc.Parameters.AddWithValue("$id", spaceId);
         using var sr = sc.ExecuteReader();
         if (!sr.Read()) return Results.BadRequest(new { error = "Unknown space" });
         spaceName = sr.IsDBNull(0) ? string.Empty : sr.GetString(0);
         pricePerHour = sr.IsDBNull(1) ? 0.0 : sr.GetDouble(1);
+        spaceCapacity = sr.IsDBNull(2) ? 0 : sr.GetInt32(2);
     }
     var totalHT = Math.Round(pricePerHour * hours, 2);
+
+    var partySize = 1 + attendees.Count; // owner + attendees
+    if (spaceCapacity > 0 && partySize > spaceCapacity)
+        return Results.BadRequest(new { error = $"This space only fits {spaceCapacity} ({partySize} requested)" });
 
     // Resolve current user to DB OwnerId
     var currentName = http.User?.Identity?.Name ?? string.Empty;
@@ -1120,7 +1126,7 @@ app.MapGet("/api/admin/backup", (HttpContext http) =>
 
 app.MapGet("/api/admin/dashboard", (HttpContext http) =>
 {
-    if (!http.User.IsInRole("Admin")) return Results.Forbid();
+    if (!(http.User.IsInRole("Admin") || http.User.IsInRole("Comptabilite"))) return Results.Forbid();
     using var conn = DbHelpers.OpenConnection(GetDbPath());
 
     int Count(string sql)
