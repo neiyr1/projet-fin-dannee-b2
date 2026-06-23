@@ -34,15 +34,6 @@
   <div class="col-6 col-md-3">
     <div class="card stat-card">
       <div class="card-body text-center">
-        <i class="bi bi-door-open fs-2 text-success"></i>
-        <div class="fs-3 fw-bold mt-1" id="statRooms">--</div>
-        <div class="text-muted small">Rooms</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-6 col-md-3">
-    <div class="card stat-card">
-      <div class="card-body text-center">
         <i class="bi bi-calendar-check fs-2 text-warning"></i>
         <div class="fs-3 fw-bold mt-1" id="statReservations">--</div>
         <div class="text-muted small">Bookings</div>
@@ -71,14 +62,6 @@
     </a>
   </div>
   <div class="col-md-3">
-    <a href="/Rooms" class="card action-card text-decoration-none text-dark h-100">
-      <div class="card-body">
-        <h5 class="card-title"><i class="bi bi-door-open me-2 text-success"></i>Rooms</h5>
-        <p class="card-text text-muted small mb-0">Add, remove, or browse rooms.</p>
-      </div>
-    </a>
-  </div>
-  <div class="col-md-3">
     <a href="/Booking" class="card action-card text-decoration-none text-dark h-100">
       <div class="card-body">
         <h5 class="card-title"><i class="bi bi-calendar-check me-2 text-warning"></i>Book a Room</h5>
@@ -103,7 +86,6 @@
       if (!res.ok) return;
       const data = await res.json();
       document.getElementById('statSpaces').textContent = data.spaces;
-      document.getElementById('statRooms').textContent = data.rooms;
       document.getElementById('statReservations').textContent = data.reservations;
       document.getElementById('statUsers').textContent = data.users;
     } catch {}

@@ -1,12 +1,6 @@
 async function fetchSpaces(){
   try{
-    // Prefer rooms if present
-    let res = await fetch('/api/rooms', { credentials: 'include' });
-    if(res.ok){
-      const rooms = await res.json();
-      if(Array.isArray(rooms) && rooms.length) return rooms.map(r=>({ id: r.id, name: r.name, capacity: r.capacity }));
-    }
-    res = await fetch('/api/spaces', { credentials: 'include' });
+    const res = await fetch('/api/spaces', { credentials: 'include' });
     if(!res.ok) throw new Error('Failed to load');
     return await res.json();
   }catch(e){

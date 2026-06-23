@@ -153,25 +153,6 @@ CREATE TABLE IF NOT EXISTS Reminders (
         }
     }
 
-    public static void SeedDefaultRooms(string dbPath)
-    {
-        using var conn = OpenConnection(dbPath);
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(1) FROM Rooms";
-        if (Convert.ToInt32(cmd.ExecuteScalar() ?? 0) > 0) return;
-
-        var names = new[] { "Alpha", "Beta", "Gamma", "Delta", "Epsilon" };
-        foreach (var n in names)
-        {
-            using var ins = conn.CreateCommand();
-            ins.CommandText = "INSERT INTO Rooms (Name, Capacity, Location) VALUES ($n, $c, $loc)";
-            ins.Parameters.AddWithValue("$n", n);
-            ins.Parameters.AddWithValue("$c", 6);
-            ins.Parameters.AddWithValue("$loc", "");
-            ins.ExecuteNonQuery();
-        }
-    }
-
     public static bool VerifyPassword(string password, string storedBase64)
     {
         try

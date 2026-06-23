@@ -64,7 +64,6 @@ var dbPath = GetDbPath();
 DbHelpers.InitializeDatabase(dbPath);
 DbHelpers.SeedAdminUser(dbPath);
 DbHelpers.SeedDefaultSpaces(dbPath);
-DbHelpers.SeedDefaultRooms(dbPath);
 
 // --- Auth endpoints ---
 
@@ -527,51 +526,6 @@ app.MapDelete("/api/resources/{id:int}", (HttpContext http, int id) =>
     if (rows == 0) return Results.NotFound();
     DbHelpers.WriteAudit(GetDbPath(), http.User?.Identity?.Name, "ResourceDelete", $"Resource#{id}");
     return Results.NoContent();
-}).RequireAuthorization();
-
-// --- Rooms endpoints ---
-
-app.MapGet("/api/rooms", () =>
-{
-    var list = new List<object>();
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
-    using var cmd = conn.CreateCommand();
-    cmd.CommandText = "SELECT ID, Name, Capacity, Location FROM Rooms ORDER BY ID";
-    using var rdr = cmd.ExecuteReader();
-    while (rdr.Read())
-        list.Add(new { id = rdr.GetInt32(0), name = rdr.GetString(1), capacity = rdr.IsDBNull(2) ? 0 : rdr.GetInt32(2), location = rdr.IsDBNull(3) ? string.Empty : rdr.GetString(3) });
-    return Results.Ok(list);
-});
-
-app.MapPost("/api/rooms", async (HttpContext http) =>
-{
-    if (!http.User.IsInRole("Admin")) return Results.Forbid();
-
-    var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, object>>(http.Request.Body);
-    if (body == null || !body.TryGetValue("name", out var nameObj)) return Results.BadRequest(new { error = "Name required" });
-    var name = nameObj?.ToString() ?? string.Empty;
-    var capacity = body.TryGetValue("capacity", out var capObj) && int.TryParse(capObj?.ToString(), out var cap) ? cap : 0;
-    var location = body.TryGetValue("location", out var locObj) ? locObj?.ToString() ?? string.Empty : string.Empty;
-
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
-    using var cmd = conn.CreateCommand();
-    cmd.CommandText = "INSERT INTO Rooms (Name, Capacity, Location) VALUES ($name, $cap, $loc); SELECT last_insert_rowid();";
-    cmd.Parameters.AddWithValue("$name", name);
-    cmd.Parameters.AddWithValue("$cap", capacity);
-    cmd.Parameters.AddWithValue("$loc", location);
-    var id = Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
-    return Results.Created($"/api/rooms/{id}", new { id, name, capacity, location });
-}).RequireAuthorization();
-
-app.MapDelete("/api/rooms/{id:int}", (HttpContext http, int id) =>
-{
-    if (!http.User.IsInRole("Admin")) return Results.Forbid();
-
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
-    using var cmd = conn.CreateCommand();
-    cmd.CommandText = "DELETE FROM Rooms WHERE ID = $id";
-    cmd.Parameters.AddWithValue("$id", id);
-    return cmd.ExecuteNonQuery() == 0 ? Results.NotFound() : Results.NoContent();
 }).RequireAuthorization();
 
 // --- Reservation endpoints ---
@@ -1293,7 +1247,7 @@ app.MapGet("/api/stats", (HttpContext http) =>
 
     int count(string table) { using var c = conn.CreateCommand(); c.CommandText = $"SELECT COUNT(1) FROM {table}"; return Convert.ToInt32(c.ExecuteScalar() ?? 0); }
 
-    return Results.Ok(new { spaces = count("Spaces"), rooms = count("Rooms"), reservations = count("Reservation"), users = count("Users") });
+    return Results.Ok(new { spaces = count("Spaces"), reservations = count("Reservation"), users = count("Users") });
 }).RequireAuthorization();
 
 // --- Utility endpoints ---
