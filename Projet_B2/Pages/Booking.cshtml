@@ -10,9 +10,33 @@
       <div class="card mb-3">
         <div class="card-body">
           <form onsubmit="return false;" id="bookingForm">
+            <div class="mb-2">
+              <label class="form-label">Type</label>
+              <div class="btn-group btn-group-sm w-100" role="group" id="typeFilter">
+                <input type="radio" class="btn-check" name="type" id="t-all" value="" checked />
+                <label class="btn btn-outline-primary" for="t-all">All</label>
+                <input type="radio" class="btn-check" name="type" id="t-nomad" value="Nomad" />
+                <label class="btn btn-outline-primary" for="t-nomad">Nomad</label>
+                <input type="radio" class="btn-check" name="type" id="t-office" value="Office" />
+                <label class="btn btn-outline-primary" for="t-office">Office</label>
+                <input type="radio" class="btn-check" name="type" id="t-meeting" value="Meeting" />
+                <label class="btn btn-outline-primary" for="t-meeting">Meeting</label>
+                <input type="radio" class="btn-check" name="type" id="t-conf" value="Conference" />
+                <label class="btn btn-outline-primary" for="t-conf">Conference</label>
+              </div>
+            </div>
             <div class="mb-3">
-              <label class="form-label">Room</label>
+              <label class="form-label">Space</label>
               <select id="spaceSelect" class="form-select"></select>
+              <div class="small text-muted mt-1" id="spaceEquipments"></div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label">Quick slot</label>
+              <div class="btn-group btn-group-sm w-100" role="group">
+                <button type="button" class="btn btn-outline-secondary" data-slot="morning">Morning · 9-13</button>
+                <button type="button" class="btn btn-outline-secondary" data-slot="afternoon">Afternoon · 14-18</button>
+                <button type="button" class="btn btn-outline-secondary" data-slot="day">Full day · 9-18</button>
+              </div>
             </div>
             <div class="mb-3">
               <label class="form-label">Date</label>
@@ -28,11 +52,35 @@
                 <input id="hoursInput" type="number" min="1" max="12" class="form-control" />
               </div>
             </div>
-            <div class="d-flex gap-2 align-items-center">
-              <button id="bookBtn" class="btn btn-primary">Book</button>
+            <div class="mb-3">
+              <label class="form-label">Invite attendees <span class="text-muted small">(optional)</span></label>
+              <input id="attendeesInput" class="form-control" placeholder="alice@example.com, bob@example.com" />
+              <div class="form-text">Comma-separated emails. They receive an invitation.</div>
+            </div>
+            <div class="alert alert-light border d-flex justify-content-between align-items-center py-2 mb-3" id="priceBox">
+              <div class="small text-muted">Estimated price</div>
+              <div><span id="priceTotal" class="fw-bold fs-5">0.00 €</span> <span class="text-muted small" id="priceDetail"></span></div>
+            </div>
+            <div class="d-flex gap-2 align-items-center flex-wrap">
+              <button id="bookBtn" class="btn btn-primary"><i class="bi bi-check2 me-1"></i>Confirm booking</button>
+              <button id="cartBtn" type="button" class="btn btn-outline-primary"><i class="bi bi-cart-plus me-1"></i>Add to cart</button>
               <div id="bookingMsg" class="text-muted small"></div>
             </div>
           </form>
+        </div>
+      </div>
+
+      <div class="card mb-3" id="cartCard" style="display:none">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0"><i class="bi bi-cart3 me-1"></i>Cart <span class="badge bg-primary ms-1" id="cartBadge">0</span></h6>
+            <button class="btn btn-sm btn-link text-danger" id="cartClear">Clear</button>
+          </div>
+          <ul id="cartList" class="list-group list-group-flush mb-2"></ul>
+          <div class="d-flex justify-content-between align-items-center">
+            <div class="small text-muted">Total TTC <strong id="cartTotal" class="ms-1">0.00 €</strong></div>
+            <button id="checkoutBtn" class="btn btn-success btn-sm"><i class="bi bi-bag-check me-1"></i>Checkout</button>
+          </div>
         </div>
       </div>
 
