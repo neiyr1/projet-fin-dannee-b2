@@ -48,8 +48,8 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       const fd = new FormData(loginForm);
       const res = await postJson('/api/login', { username: fd.get('username'), password: fd.get('password') });
-      if (res.ok) location.href = '/Spaces'; // No-op change for tracking
-      else document.getElementById('msg').textContent = 'Login failed';
+      if (res.ok) location.href = '/Spaces';
+      else document.getElementById('msg').textContent = 'Connexion impossible';
     });
   }
 
@@ -67,7 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
         addForm.reset();
         loadList();
       } else {
-        alert('Failed to add');
+        alert('Ajout impossible');
       }
     });
   }
@@ -81,7 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const payload = { name: fd.get('name'), type: fd.get('type'), quantity: parseInt(fd.get('quantity')) || 1 };
       const r = await fetch(`/api/spaces/${spaceId}/resources`, { method: 'POST', headers: {'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify(payload) });
       if (r.ok) { resAddForm.querySelector('input[name=name]').value = ''; renderResources(spaceId); }
-      else alert('Failed to add resource');
+      else alert('Ajout de ressource impossible');
     });
   }
 
@@ -125,26 +125,26 @@ async function loadList() {
   for (const it of items) {
     const col = document.createElement('div');
     col.className = 'col-md-4';
-    const price = (it.pricePerHour != null) ? `${it.pricePerHour.toFixed(2)} €/h` : '—';
+      const price = (it.pricePerHour != null) ? `${it.pricePerHour.toFixed(2)} EUR/h` : '-';
     col.innerHTML = `
       <div class="card h-100">
         <div class="card-body">
           <h5 class="card-title mb-1">${typeBadgeHtml(it.type)}<i class="bi bi-grid me-2 text-primary"></i>${it.name}</h5>
-          <p class="text-muted small mb-2">Capacity: <strong>${it.capacity}</strong> · ${price}</p>
+              <p class="text-muted small mb-2">Capacite: <strong>${it.capacity}</strong> - ${price}</p>
           <div class="d-flex gap-2">
-            <button class="btn btn-sm btn-outline-secondary res-btn" data-id="${it.id}" data-name="${it.name}"><i class="bi bi-tools me-1"></i>Equipment</button>
+            <button class="btn btn-sm btn-outline-secondary res-btn" data-id="${it.id}" data-name="${it.name}"><i class="bi bi-tools me-1"></i>Equipements</button>
             <button class="btn btn-sm btn-outline-danger del-btn" data-id="${it.id}"><i class="bi bi-trash"></i></button>
           </div>
         </div>
       </div>`;
     col.querySelector('.del-btn').addEventListener('click', async () => {
-      if (!confirm(`Delete "${it.name}"?`)) return;
+      if (!confirm(`Supprimer "${it.name}" ?`)) return;
       const r = await fetch(`/api/spaces/${it.id}`, { method: 'DELETE', credentials: 'include' });
       if (r.ok) loadList();
     });
     col.querySelector('.res-btn').addEventListener('click', () => {
       document.querySelector('#resAddForm input[name=spaceId]').value = it.id;
-      document.getElementById('resTitle').textContent = '· ' + it.name;
+      document.getElementById('resTitle').textContent = '- ' + it.name;
       renderResources(it.id);
       new bootstrap.Modal(document.getElementById('resModal')).show();
     });
@@ -154,16 +154,16 @@ async function loadList() {
 
 async function renderResources(spaceId){
   const list = document.getElementById('resList');
-  list.innerHTML = '<li class="list-group-item text-muted">Loading...</li>';
+  list.innerHTML = '<li class="list-group-item text-muted">Chargement...</li>';
   const res = await fetch(`/api/spaces/${spaceId}/resources`, { credentials: 'include' });
-  if (!res.ok) { list.innerHTML = '<li class="list-group-item text-danger">Load failed</li>'; return; }
+  if (!res.ok) { list.innerHTML = '<li class="list-group-item text-danger">Chargement impossible</li>'; return; }
   const items = await res.json();
-  if (!items.length) { list.innerHTML = '<li class="list-group-item text-muted">No equipment yet.</li>'; return; }
+  if (!items.length) { list.innerHTML = '<li class="list-group-item text-muted">Aucun equipement pour le moment.</li>'; return; }
   list.innerHTML = '';
   for (const r of items){
     const li = document.createElement('li');
     li.className = 'list-group-item d-flex justify-content-between align-items-center';
-    li.innerHTML = `<div><strong>${r.name}</strong> <span class="text-muted small">${r.type ? r.type + ' · ' : ''}× ${r.quantity}</span></div>
+        li.innerHTML = `<div><strong>${r.name}</strong> <span class="text-muted small">${r.type ? r.type + ' - ' : ''}x ${r.quantity}</span></div>
       <button class="btn btn-sm btn-link text-danger"><i class="bi bi-x-circle"></i></button>`;
     li.querySelector('button').addEventListener('click', async () => {
       const d = await fetch(`/api/resources/${r.id}`, { method: 'DELETE', credentials: 'include' });

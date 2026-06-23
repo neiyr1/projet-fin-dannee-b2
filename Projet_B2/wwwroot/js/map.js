@@ -1,14 +1,16 @@
 async function fetchSpaces(){
   try{
-    // Prefer rooms if present
-    let res = await fetch('/api/rooms', { credentials: 'include' });
+    let res = await fetch('/api/spaces', { credentials: 'include' });
+    if(res.ok){
+      const spaces = await res.json();
+      if(Array.isArray(spaces) && spaces.length) return spaces;
+    }
+    res = await fetch('/api/rooms', { credentials: 'include' });
     if(res.ok){
       const rooms = await res.json();
-      if(Array.isArray(rooms) && rooms.length) return rooms.map(r=>({ id: r.id, name: r.name, capacity: r.capacity }));
+      if(Array.isArray(rooms) && rooms.length) return rooms.map(r=>({ id: r.id, name: r.name, capacity: r.capacity, type: 'Room' }));
     }
-    res = await fetch('/api/spaces', { credentials: 'include' });
-    if(!res.ok) throw new Error('Failed to load');
-    return await res.json();
+    throw new Error('Chargement impossible');
   }catch(e){
     console.error(e);
     return [];
@@ -61,7 +63,7 @@ function renderMap(spaces){
               const bc = document.getElementById('bookingContainer');
               const cs = bc && window.getComputedStyle(bc);
               if (!bc || (cs && (cs.display === 'none' || cs.visibility === 'hidden'))){
-                console.warn('[map] bookingContainer still hidden — showing fallback overlay');
+            console.warn('[map] bookingContainer still hidden - showing fallback overlay');
                 // create simple overlay
                 let overlay = document.getElementById('mapBookingFallback');
                 if (!overlay){
@@ -75,7 +77,7 @@ function renderMap(spaces){
                   inner.style.width = '90%'; inner.style.maxWidth = '900px'; inner.style.maxHeight = '80%'; inner.style.overflow = 'auto';
                   inner.style.background = '#fff'; inner.style.borderRadius = '8px'; inner.style.padding = '12px';
                   const closeBtn = document.createElement('button');
-                  closeBtn.textContent = 'Close'; closeBtn.className = 'btn btn-sm btn-outline-secondary';
+                  closeBtn.textContent = 'Fermer'; closeBtn.className = 'btn btn-sm btn-outline-secondary';
                   closeBtn.style.float = 'right'; closeBtn.addEventListener('click', ()=>{ overlay.remove(); location.reload(); });
                   inner.appendChild(closeBtn);
                   // move bookingPanel into overlay
@@ -95,7 +97,7 @@ function renderMap(spaces){
       try { selectSpace(s.id); } catch (e) { console.error('[map] selectSpace failed', e); }
     });
     const title = document.createElementNS(svgNS,'title');
-    title.textContent = `${s.name} — capacity ${s.capacity}`;
+      title.textContent = `${s.name} - capacite ${s.capacity}`;
     rect.appendChild(title);
     svg.appendChild(rect);
     rect.setAttribute('data-space-id', s.id);
@@ -112,13 +114,13 @@ function renderMap(spaces){
     cap.setAttribute('x', x + 12);
     cap.setAttribute('y', y + 48);
     cap.setAttribute('class','space-cap');
-    cap.textContent = `Capacity: ${s.capacity}`;
+    cap.textContent = `Capacite: ${s.capacity}`;
     cap.setAttribute('pointer-events', 'none');
     svg.appendChild(cap);
   });
 
   container.appendChild(svg);
-  document.getElementById('count').textContent = `${spaces.length} spaces`;
+  document.getElementById('count').textContent = `${spaces.length} espaces`;
 }
 
 function clearSelection(){
@@ -140,10 +142,10 @@ function selectSpace(id){
     // show only basic info and a link to the booking panel. Detailed week calendar
     // is hidden by default on the map page and will be revealed when a room is clicked.
     detail.innerHTML = `
-      <div class="mb-2"><strong>${s.name}</strong><div class="text-muted small">Capacity: ${s.capacity}</div></div>
+      <div class="mb-2"><strong>${s.name}</strong><div class="text-muted small">Capacite: ${s.capacity}</div></div>
       <div class="d-flex gap-2 mt-2">
-        <button id="previewCalendarBtn" class="btn btn-sm btn-outline-primary">Preview calendar</button>
-        <a href="/Booking?spaceId=${encodeURIComponent(s.id)}" class="btn btn-sm btn-primary">Book</a>
+        <button id="previewCalendarBtn" class="btn btn-sm btn-outline-primary">Voir calendrier</button>
+        <a href="/Booking?spaceId=${encodeURIComponent(s.id)}" class="btn btn-sm btn-primary">Reserver</a>
       </div>
     `;
     // wire preview button
@@ -176,7 +178,7 @@ function selectSpace(id){
           <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content">
               <div class="modal-header">
-                <h5 class="modal-title">Booking — ${s.name}</h5>
+          <h5 class="modal-title">Reservation - ${s.name}</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
               </div>
               <div class="modal-body" id="mapBookingModalBody"></div>
@@ -251,11 +253,11 @@ async function renderSpaceWeek(spaceId, capacity){
   const grid = document.getElementById('mapWeekView');
   const lbl = document.getElementById('mapWeekLabel');
   if(!grid) return;
-  grid.innerHTML = 'Loading...';
+  grid.innerHTML = 'Chargement...';
   console.log('renderSpaceWeek', { spaceId, capacity, mapWeekStart });
   const days = [];
   for(let i=0;i<7;i++) days.push(addDays(mapWeekStart,i));
-  lbl.textContent = `${days[0].toISOString().slice(0,10)} → ${days[6].toISOString().slice(0,10)}`;
+  lbl.textContent = `${days[0].toISOString().slice(0,10)} a ${days[6].toISOString().slice(0,10)}`;
 
   // fetch reservations per day
   const promises = days.map(d => fetch(`/api/reservations/space?spaceId=${spaceId}&date=${d.toISOString().slice(0,10)}`, { credentials: 'include' })
@@ -271,7 +273,7 @@ async function renderSpaceWeek(spaceId, capacity){
     results = await Promise.all(promises);
   } catch(err){
     console.error('Failed to load reservations', err);
-    grid.innerHTML = `<div class="text-danger">Failed to load reservations: ${err.message}</div>`;
+    grid.innerHTML = `<div class="text-danger">Chargement des reservations impossible : ${err.message}</div>`;
     // if unauthorized, redirect to login
     if (String(err.message).includes('HTTP 401')){
       window.location.href = '/Login';
@@ -283,7 +285,7 @@ async function renderSpaceWeek(spaceId, capacity){
   const table = document.createElement('table'); table.className = 'table table-sm';
   const thead = document.createElement('thead');
   const hr = document.createElement('tr');
-  hr.innerHTML = '<th>Hour</th>' + days.map(d=>`<th>${d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}</th>`).join('');
+  hr.innerHTML = '<th>Heure</th>' + days.map(d=>`<th>${d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}</th>`).join('');
   thead.appendChild(hr); table.appendChild(thead);
   const tbody = document.createElement('tbody');
   for(let h=7; h<=21; h++){
@@ -298,7 +300,7 @@ async function renderSpaceWeek(spaceId, capacity){
         return (h >= s) && (h < s+hrs) && (b.status === 'Booked');
       });
       const count = bookingsAtHour.length;
-      if(count >= capacity) { cell.className = 'bg-danger text-white'; cell.textContent = '×'; }
+        if(count >= capacity) { cell.className = 'bg-danger text-white'; cell.textContent = 'X'; }
       else if(count > 0) { cell.className = 'bg-warning text-dark'; cell.textContent = String(count); }
       else { cell.className = 'bg-success text-white'; cell.textContent = '✓'; }
 
@@ -306,7 +308,7 @@ async function renderSpaceWeek(spaceId, capacity){
         const bk = bookingsAtHour[0];
         const owner = bk.ownerName || ('User#'+(bk.ownerId||'?'));
         const st = bk.status || 'Booked';
-        cell.title = `${owner} — ${st}`;
+          cell.title = `${owner} - ${st}`;
       }
 
       // clicking a cell opens Booking page with prefilled params
@@ -337,10 +339,10 @@ function renderList(spaces){
   ul.innerHTML = '';
   spaces.forEach(s=>{
     const li = document.createElement('li');
-    li.textContent = `${s.name} (cap ${s.capacity})`;
+    li.textContent = `${s.name} (cap. ${s.capacity})`;
     li.dataset.spaceId = s.id;
     li.dataset.name = s.name;
-    li.addEventListener('mouseenter', ()=>{ const r = document.querySelector(`.space-rect[data-space-id='${s.id}']`); if(r) r.classList.add('selected'); const detail = document.getElementById('detailPanel'); if(detail) detail.innerHTML = `<strong>${s.name}</strong><div>Capacity: ${s.capacity}</div>`; });
+    li.addEventListener('mouseenter', ()=>{ const r = document.querySelector(`.space-rect[data-space-id='${s.id}']`); if(r) r.classList.add('selected'); const detail = document.getElementById('detailPanel'); if(detail) detail.innerHTML = `<strong>${s.name}</strong><div>Capacite: ${s.capacity}</div>`; });
     li.addEventListener('mouseleave', ()=>{ clearSelection(); });
     li.addEventListener('click', ()=> selectSpace(s.id));
     ul.appendChild(li);

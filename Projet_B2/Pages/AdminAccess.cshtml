@@ -1,10 +1,10 @@
 @page
-@{ Layout = "_Layout"; ViewData["Title"] = "Access control"; }
+@{ Layout = "_Layout"; ViewData["Title"] = "Controle QR"; }
 
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="page-heading">
   <div>
-    <h1 class="h4 mb-0"><i class="bi bi-shield-check me-2 text-success"></i>Access control</h1>
-    <div class="text-muted small">Front desk: paste a QR token to validate an entry pass.</div>
+    <h1 class="h4 mb-0"><i class="bi bi-shield-check me-2 text-success"></i>Controle QR</h1>
+    <div class="text-muted small">Accueil: collez un token QR pour verifier un acces.</div>
   </div>
 </div>
 
@@ -12,13 +12,13 @@
   <div class="col-md-6">
     <div class="card mb-3">
       <div class="card-body">
-        <label class="form-label">Scan / paste a QR token</label>
+        <label class="form-label">Scanner / coller un token QR</label>
         <div class="input-group">
           <span class="input-group-text"><i class="bi bi-qr-code"></i></span>
-          <input type="text" id="token" class="form-control" placeholder="paste token here" autofocus />
-          <button id="verify" class="btn btn-primary"><i class="bi bi-check2-square me-1"></i>Verify</button>
+          <input type="text" id="token" class="form-control" placeholder="Coller le token ici" autofocus />
+          <button id="verify" class="btn btn-primary"><i class="bi bi-check2-square me-1"></i>Verifier</button>
         </div>
-        <div class="form-text">Tokens are embedded inside the QR image attached to the booking invoice.</div>
+        <div class="form-text">Le token est integre dans le QR code de la reservation.</div>
       </div>
     </div>
 
@@ -33,15 +33,15 @@ document.getElementById('verify').addEventListener('click', async () => {
   if (!token) return;
   const res = await fetch('/api/access/verify', { method: 'POST', headers: {'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ token }) });
   if (res.status === 401) { location.href = '/Login'; return; }
-  if (res.status === 403) { result.innerHTML = '<div class="alert alert-danger">Admin or front-desk role required.</div>'; return; }
+  if (res.status === 403) { result.innerHTML = '<div class="alert alert-danger">Role admin ou accueil requis.</div>'; return; }
   const data = await res.json();
   if (data.granted){
-    result.innerHTML = `<div class="alert alert-success"><h5 class="mb-2"><i class="bi bi-check-circle me-2"></i>Access granted</h5>
-      <div><strong>${data.owner}</strong> at <strong>${data.space}</strong></div>
-      <div class="small text-muted">${new Date(data.start).toLocaleString()} → ${new Date(data.end).toLocaleString()}</div></div>`;
+    result.innerHTML = `<div class="alert alert-success"><h5 class="mb-2"><i class="bi bi-check-circle me-2"></i>Acces autorise</h5>
+      <div><strong>${data.owner}</strong> - <strong>${data.space}</strong></div>
+      <div class="small text-muted">${new Date(data.start).toLocaleString()} a ${new Date(data.end).toLocaleString()}</div></div>`;
   } else {
-    result.innerHTML = `<div class="alert alert-danger"><h5 class="mb-2"><i class="bi bi-x-circle me-2"></i>Access denied</h5>
-      <div class="small">${data.reason || 'Outside booking window or cancelled.'}</div></div>`;
+    result.innerHTML = `<div class="alert alert-danger"><h5 class="mb-2"><i class="bi bi-x-circle me-2"></i>Acces refuse</h5>
+      <div class="small">${data.reason || 'Hors creneau de reservation ou reservation annulee.'}</div></div>`;
   }
 });
 document.getElementById('token').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('verify').click(); });
