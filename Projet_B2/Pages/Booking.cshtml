@@ -1,15 +1,13 @@
 @page
 @{ Layout = "_Layout"; ViewData["Title"] = "Reservation"; }
-<div id="bookingContainer">
 <div class="page-heading">
-<div class="d-flex align-items-center gap-3">
-  <img src="~/images/Logo_1_mini.svg" asp-append-version="true" alt="Logo" style="height:36px" />
   <div>
-    <h1 class="h4 mb-0">Reserver un espace</h1>
+    <h1 class="h4 mb-0"><i class="bi bi-calendar-check me-2 text-primary"></i>Reserver un espace</h1>
     <div class="text-muted small">Choisissez un espace, un creneau, puis confirmez ou ajoutez au panier.</div>
   </div>
+  <a class="btn btn-outline-secondary btn-sm" href="/SpacesMap"><i class="bi bi-map me-1"></i>Voir le plan</a>
 </div>
-</div>
+<div id="bookingContainer">
   <div class="row">
     <div class="col-md-5">
       <div class="card mb-3">
@@ -94,7 +92,7 @@
           <div class="d-flex justify-content-between align-items-center mb-2">
             <div>
               <button id="prevWeek" class="btn btn-sm btn-outline-secondary">&larr;</button>
-              <button id="todayBtn" class="btn btn-sm btn-outline-primary">Today</button>
+              <button id="todayBtn" class="btn btn-sm btn-outline-primary">Aujourd'hui</button>
               <button id="nextWeek" class="btn btn-sm btn-outline-secondary">&rarr;</button>
             </div>
             <div class="fw-semibold" id="weekLabel">Semaine</div>
