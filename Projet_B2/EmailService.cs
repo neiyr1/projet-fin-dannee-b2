@@ -1,5 +1,7 @@
+using System.Text.Json.Nodes;
 using MailKit.Net.Smtp;
 using MailKit.Security;
+using Microsoft.Identity.Client;
 using MimeKit;
 
 public class EmailService
@@ -127,31 +129,80 @@ public class EmailService
             return;
         }
 
-        var port = _config.GetValue<int?>("Smtp:Port") ?? 587;
         var user = _config.GetValue<string>("Smtp:User");
-        var pwd = _config.GetValue<string>("Smtp:Password");
-        var useStartTls = _config.GetValue<bool?>("Smtp:UseStartTls") ?? true;
+        var clientId = _config.GetValue<string>("Smtp:ClientId");
+        var tenantId = _config.GetValue<string>("Smtp:TenantId");
+        var clientSecret = _config.GetValue<string>("Smtp:ClientSecret");
 
-        using var client = new SmtpClient();
-        try
+        if (!string.IsNullOrEmpty(user) && !string.IsNullOrEmpty(clientId)
+            && !string.IsNullOrEmpty(tenantId) && !string.IsNullOrEmpty(clientSecret))
         {
-            await client.ConnectAsync(host, port, useStartTls ? SecureSocketOptions.StartTls : SecureSocketOptions.Auto);
-            if (!string.IsNullOrEmpty(user))
-                await client.AuthenticateAsync(user, pwd ?? string.Empty);
-            await client.SendAsync(message);
-            _logger.LogInformation("Sent email '{Subject}' to {Email}", subject, recipient);
+            try
+            {
+                var app = ConfidentialClientApplicationBuilder
+                    .Create(clientId)
+                    .WithClientSecret(clientSecret)
+                    .WithAuthority($"https://login.microsoftonline.com/{tenantId}")
+                    .Build();
+                var tokenResult = await app.AcquireTokenForClient(["https://graph.microsoft.com/.default"]).ExecuteAsync();
+
+                var attachmentsNode = new JsonArray();
+                if (!string.IsNullOrEmpty(attachmentPath) && File.Exists(attachmentPath))
+                {
+                    var bytes = await File.ReadAllBytesAsync(attachmentPath);
+                    attachmentsNode.Add(new JsonObject
+                    {
+                        ["@odata.type"] = "#microsoft.graph.fileAttachment",
+                        ["name"] = Path.GetFileName(attachmentPath),
+                        ["contentBytes"] = Convert.ToBase64String(bytes)
+                    });
+                }
+
+                var msgNode = new JsonObject
+                {
+                    ["subject"] = subject,
+                    ["body"] = new JsonObject { ["contentType"] = "HTML", ["content"] = html },
+                    ["toRecipients"] = new JsonArray(new JsonObject
+                    {
+                        ["emailAddress"] = new JsonObject
+                        {
+                            ["address"] = recipient,
+                            ["name"] = string.IsNullOrWhiteSpace(toName) ? recipient : toName
+                        }
+                    }),
+                    ["from"] = new JsonObject
+                    {
+                        ["emailAddress"] = new JsonObject { ["address"] = fromAddr, ["name"] = fromName }
+                    }
+                };
+                if (attachmentsNode.Count > 0) msgNode["attachments"] = attachmentsNode;
+
+                var payload = new JsonObject { ["message"] = msgNode };
+
+                using var http = new HttpClient();
+                http.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", tokenResult.AccessToken);
+                var resp = await http.PostAsync(
+                    $"https://graph.microsoft.com/v1.0/users/{user}/sendMail",
+                    new StringContent(payload.ToJsonString(), System.Text.Encoding.UTF8, "application/json"));
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var errBody = await resp.Content.ReadAsStringAsync();
+                    throw new HttpRequestException($"{(int)resp.StatusCode} {resp.ReasonPhrase}: {errBody}");
+                }
+                _logger.LogInformation("Sent email '{Subject}' to {Email} via Graph API", subject, recipient);
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Graph API send failed — falling back to .eml file");
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "SMTP send failed — falling back to .eml file");
-            var safeSlug = string.Concat(slug.Select(c => char.IsLetterOrDigit(c) || c == '-' ? c : '_'));
-            var outPath = Path.Combine(_outboxDir, $"{safeSlug}.eml");
-            await using var fs = File.Create(outPath);
-            await message.WriteToAsync(fs);
-        }
-        finally
-        {
-            if (client.IsConnected) await client.DisconnectAsync(true);
-        }
+
+        var fallbackSlug = string.Concat(slug.Select(c => char.IsLetterOrDigit(c) || c == '-' ? c : '_'));
+        var fallbackPath = Path.Combine(_outboxDir, $"{fallbackSlug}.eml");
+        await using var fallbackFs = File.Create(fallbackPath);
+        await message.WriteToAsync(fallbackFs);
+        _logger.LogInformation("Wrote .eml fallback to {Path}", fallbackPath);
     }
 }
