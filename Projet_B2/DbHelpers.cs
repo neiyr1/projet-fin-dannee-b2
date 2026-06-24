@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS Users (
     Last_Name TEXT,
     Email TEXT UNIQUE,
     Role TEXT,
-    PasswordHash TEXT
+    PasswordHash TEXT,
+    AccountEnabled INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS Reservation (
@@ -224,7 +225,8 @@ CREATE TABLE IF NOT EXISTS Reminders (
             ["emailverifytoken"] = false,
             ["adsamaccountname"] = false,
             ["aduserprincipalname"] = false,
-            ["adobjectguid"] = false
+            ["adobjectguid"] = false,
+            ["accountenabled"] = false
         };
         while (rdr.Read())
         {
@@ -240,7 +242,8 @@ CREATE TABLE IF NOT EXISTS Reminders (
             ["emailverifytoken"] = "ALTER TABLE Users ADD COLUMN EmailVerifyToken TEXT;",
             ["adsamaccountname"] = "ALTER TABLE Users ADD COLUMN ADSamAccountName TEXT;",
             ["aduserprincipalname"] = "ALTER TABLE Users ADD COLUMN ADUserPrincipalName TEXT;",
-            ["adobjectguid"] = "ALTER TABLE Users ADD COLUMN ADObjectGuid TEXT;"
+            ["adobjectguid"] = "ALTER TABLE Users ADD COLUMN ADObjectGuid TEXT;",
+            ["accountenabled"] = "ALTER TABLE Users ADD COLUMN AccountEnabled INTEGER NOT NULL DEFAULT 1;"
         };
 
         foreach (var (key, sql) in migrations)

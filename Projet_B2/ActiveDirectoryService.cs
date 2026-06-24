@@ -1,3 +1,4 @@
+using System.DirectoryServices;
 using System.DirectoryServices.AccountManagement;
 using System.Globalization;
 using System.Text;
@@ -24,17 +25,18 @@ public sealed class ActiveDirectoryService
         EnsureWindows();
 
         var settings = ReadSettings(requireContainer: true, requireServiceAccount: true);
-        using var context = CreateContext(settings, useServiceAccount: true);
+        using var createContext = CreateUserContainerContext(settings);
+        using var searchContext = CreateDomainContext(settings, useServiceAccount: true);
 
         var upn = BuildUserPrincipalName(settings, email);
-        if (FindUser(context, IdentityType.UserPrincipalName, upn) != null)
+        if (FindUser(searchContext, IdentityType.UserPrincipalName, upn) != null)
             throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Duplicate, $"Un compte AD existe deja pour {upn}.");
 
-        var sam = FindAvailableSamAccountName(context, BuildSamBase(displayName, email));
+        var sam = FindAvailableSamAccountName(searchContext, BuildSamBase(displayName, email));
 
         try
         {
-            using var user = new UserPrincipal(context)
+            using var user = new UserPrincipal(createContext)
             {
                 SamAccountName = sam,
                 UserPrincipalName = upn,
@@ -75,7 +77,7 @@ public sealed class ActiveDirectoryService
         if (string.IsNullOrWhiteSpace(password)) return false;
 
         var settings = ReadSettings(requireContainer: false, requireServiceAccount: false);
-        using var context = CreateContext(settings, useServiceAccount: false);
+        using var context = CreateDomainContext(settings, useServiceAccount: false);
         var candidates = BuildLoginCandidates(login, samAccountName, userPrincipalName, settings.NetBiosName).ToArray();
 
         foreach (var candidate in candidates)
@@ -102,7 +104,7 @@ public sealed class ActiveDirectoryService
         EnsureWindows();
 
         var settings = ReadSettings(requireContainer: true, requireServiceAccount: true);
-        using var context = CreateContext(settings, useServiceAccount: true);
+        using var context = CreateDomainContext(settings, useServiceAccount: true);
         using var user = FindUser(context, IdentityType.SamAccountName, samAccountName)
             ?? (!string.IsNullOrWhiteSpace(userPrincipalName) ? FindUser(context, IdentityType.UserPrincipalName, userPrincipalName) : null);
 
@@ -125,24 +127,87 @@ public sealed class ActiveDirectoryService
         }
     }
 
-    private PrincipalContext CreateContext(ActiveDirectorySettings settings, bool useServiceAccount)
+    public void SetAccountEnabled(string samAccountName, string? userPrincipalName, bool enabled)
+    {
+        if (!IsEnabled)
+            throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Configuration, "Active Directory n'est pas active.");
+        EnsureWindows();
+
+        var settings = ReadSettings(requireContainer: true, requireServiceAccount: true);
+        if (!enabled && string.IsNullOrWhiteSpace(settings.DisabledUsersContainerDistinguishedName))
+            throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Configuration, "ActiveDirectory:DisabledUsersContainerDistinguishedName est requis pour desactiver un compte.");
+
+        using var context = CreateDomainContext(settings, useServiceAccount: true);
+        using var user = FindUser(context, IdentityType.SamAccountName, samAccountName)
+            ?? (!string.IsNullOrWhiteSpace(userPrincipalName) ? FindUser(context, IdentityType.UserPrincipalName, userPrincipalName) : null);
+
+        if (user == null)
+            throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.NotFound, "Compte Active Directory introuvable.");
+
+        try
+        {
+            user.Enabled = enabled;
+            user.Save();
+
+            var targetContainer = enabled
+                ? settings.UsersContainerDistinguishedName
+                : settings.DisabledUsersContainerDistinguishedName;
+            MoveUserToContainer(user, settings, targetContainer);
+        }
+        catch (PrincipalException ex)
+        {
+            _logger.LogError(ex, "Active Directory status update failed for {SamAccountName}", samAccountName);
+            throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Unavailable, "Mise a jour du statut AD impossible.", ex);
+        }
+        catch (DirectoryServicesCOMException ex)
+        {
+            _logger.LogError(ex, "Active Directory move failed for {SamAccountName}", samAccountName);
+            throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Unavailable, "Deplacement du compte AD impossible.", ex);
+        }
+    }
+
+    private PrincipalContext CreateUserContainerContext(ActiveDirectorySettings settings)
+    {
+        var serverOrDomain = !string.IsNullOrWhiteSpace(settings.DomainController)
+            ? settings.DomainController
+            : settings.DomainDnsName;
+
+        return new PrincipalContext(
+            ContextType.Domain,
+            serverOrDomain,
+            settings.UsersContainerDistinguishedName,
+            ContextOptions.Negotiate,
+            settings.ServiceAccountUser,
+            settings.ServiceAccountPassword);
+    }
+
+    private PrincipalContext CreateDomainContext(ActiveDirectorySettings settings, bool useServiceAccount)
     {
         var serverOrDomain = !string.IsNullOrWhiteSpace(settings.DomainController)
             ? settings.DomainController
             : settings.DomainDnsName;
 
         if (useServiceAccount)
-        {
-            return new PrincipalContext(
-                ContextType.Domain,
-                serverOrDomain,
-                settings.UsersContainerDistinguishedName,
-                ContextOptions.Negotiate,
-                settings.ServiceAccountUser,
-                settings.ServiceAccountPassword);
-        }
+            return new PrincipalContext(ContextType.Domain, serverOrDomain, null, ContextOptions.Negotiate, settings.ServiceAccountUser, settings.ServiceAccountPassword);
 
         return new PrincipalContext(ContextType.Domain, serverOrDomain);
+    }
+
+    private static void MoveUserToContainer(UserPrincipal user, ActiveDirectorySettings settings, string targetContainerDn)
+    {
+        if (string.IsNullOrWhiteSpace(targetContainerDn)) return;
+
+        using var entry = (DirectoryEntry)user.GetUnderlyingObject();
+        var currentDn = entry.Properties["distinguishedName"]?.Value?.ToString() ?? string.Empty;
+        if (currentDn.EndsWith(targetContainerDn, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var serverOrDomain = !string.IsNullOrWhiteSpace(settings.DomainController)
+            ? settings.DomainController
+            : settings.DomainDnsName;
+        using var target = new DirectoryEntry($"LDAP://{serverOrDomain}/{targetContainerDn}", settings.ServiceAccountUser, settings.ServiceAccountPassword);
+        entry.MoveTo(target);
+        entry.CommitChanges();
     }
 
     private ActiveDirectorySettings ReadSettings(bool requireContainer, bool requireServiceAccount)
@@ -152,6 +217,7 @@ public sealed class ActiveDirectoryService
         var netBios = (section["NetBiosName"] ?? string.Empty).Trim();
         var controller = (section["DomainController"] ?? string.Empty).Trim();
         var container = (section["UsersContainerDistinguishedName"] ?? string.Empty).Trim();
+        var disabledContainer = (section["DisabledUsersContainerDistinguishedName"] ?? string.Empty).Trim();
         var serviceUserEnv = section["ServiceAccountUserEnvironmentVariable"] ?? "AD_SERVICE_USERNAME";
         var servicePasswordEnv = section["ServiceAccountPasswordEnvironmentVariable"] ?? "AD_SERVICE_PASSWORD";
         var serviceUser = (Environment.GetEnvironmentVariable(serviceUserEnv) ?? string.Empty).Trim();
@@ -164,7 +230,7 @@ public sealed class ActiveDirectoryService
         if (requireServiceAccount && (string.IsNullOrWhiteSpace(serviceUser) || string.IsNullOrWhiteSpace(servicePassword)))
             throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Configuration, $"Variables d'environnement {serviceUserEnv} et {servicePasswordEnv} requises.");
 
-        return new ActiveDirectorySettings(domainDns, netBios, controller, container, serviceUser, servicePassword);
+        return new ActiveDirectorySettings(domainDns, netBios, controller, container, disabledContainer, serviceUser, servicePassword);
     }
 
     private static void EnsureWindows()
@@ -245,6 +311,7 @@ public sealed class ActiveDirectoryService
         string NetBiosName,
         string DomainController,
         string UsersContainerDistinguishedName,
+        string DisabledUsersContainerDistinguishedName,
         string ServiceAccountUser,
         string ServiceAccountPassword);
 }

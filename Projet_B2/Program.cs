@@ -43,6 +43,32 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         opts.LoginPath = "/Login";
         opts.Cookie.HttpOnly = true;
         opts.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        opts.Events = new CookieAuthenticationEvents
+        {
+            OnValidatePrincipal = async context =>
+            {
+                var idClaim = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (!int.TryParse(idClaim, out var userId)) return;
+
+                try
+                {
+                    using var conn = DbHelpers.OpenConnection(DbHelpers.GetDbPath(websitePath));
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "SELECT COALESCE(AccountEnabled, 1) FROM Users WHERE Id = $id";
+                    cmd.Parameters.AddWithValue("$id", userId);
+                    var enabled = Convert.ToInt32(cmd.ExecuteScalar() ?? 0) == 1;
+                    if (!enabled)
+                    {
+                        context.RejectPrincipal();
+                        await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                    }
+                }
+                catch
+                {
+                    // Do not reject cookies because of a transient database read error.
+                }
+            }
+        };
     });
 builder.Services.AddAuthorization();
 
@@ -103,7 +129,7 @@ app.MapPost("/api/login", async (HttpContext http, ActiveDirectoryService adServ
     {
         using var conn = DbHelpers.OpenConnection(GetDbPath());
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"SELECT Id, Name, Email, Role, PasswordHash, ADSamAccountName, ADUserPrincipalName, ADObjectGuid
+        cmd.CommandText = @"SELECT Id, Name, Email, Role, PasswordHash, ADSamAccountName, ADUserPrincipalName, ADObjectGuid, COALESCE(AccountEnabled, 1)
                             FROM Users
                             WHERE Email = $u OR Name = $u OR ADSamAccountName = $u OR ADUserPrincipalName = $u
                             LIMIT 1";
@@ -119,6 +145,9 @@ app.MapPost("/api/login", async (HttpContext http, ActiveDirectoryService adServ
             var adSam = rdr.IsDBNull(5) ? null : rdr.GetString(5);
             var adUpn = rdr.IsDBNull(6) ? null : rdr.GetString(6);
             var adGuid = rdr.IsDBNull(7) ? null : rdr.GetString(7);
+            var accountEnabled = rdr.IsDBNull(8) || rdr.GetInt32(8) == 1;
+            if (!accountEnabled)
+                return Results.Json(new { error = "Account disabled" }, statusCode: StatusCodes.Status403Forbidden);
             var isAdLinked = !string.IsNullOrWhiteSpace(adSam) || !string.IsNullOrWhiteSpace(adUpn);
 
             if (isAdLinked && adService.IsEnabled)
@@ -244,6 +273,7 @@ app.MapGet("/api/users", (HttpContext http) =>
     cmd.CommandText = @"SELECT u.Id, u.Name, u.Last_Name, u.Email, u.Role,
                                (SELECT COUNT(1) FROM Reservation r WHERE r.OwnerId = u.Id) AS BookingsCount,
                                COALESCE(u.EmailVerified, 0) AS EmailVerified,
+                               COALESCE(u.AccountEnabled, 1) AS AccountEnabled,
                                u.ADSamAccountName, u.ADUserPrincipalName, u.ADObjectGuid
                         FROM Users u ORDER BY u.Id";
     using var rdr = cmd.ExecuteReader();
@@ -257,9 +287,10 @@ app.MapGet("/api/users", (HttpContext http) =>
             role = rdr.IsDBNull(4) ? null : rdr.GetString(4),
             bookings = rdr.IsDBNull(5) ? 0 : rdr.GetInt32(5),
             emailVerified = !rdr.IsDBNull(6) && rdr.GetInt32(6) == 1,
-            adSamAccountName = rdr.IsDBNull(7) ? null : rdr.GetString(7),
-            adUserPrincipalName = rdr.IsDBNull(8) ? null : rdr.GetString(8),
-            adObjectGuid = rdr.IsDBNull(9) ? null : rdr.GetString(9)
+            accountEnabled = rdr.IsDBNull(7) || rdr.GetInt32(7) == 1,
+            adSamAccountName = rdr.IsDBNull(8) ? null : rdr.GetString(8),
+            adUserPrincipalName = rdr.IsDBNull(9) ? null : rdr.GetString(9),
+            adObjectGuid = rdr.IsDBNull(10) ? null : rdr.GetString(10)
         });
     }
     return Results.Ok(list);
@@ -452,6 +483,84 @@ app.MapPost("/api/users/{id:int}/reset-password", async (HttpContext http, int i
     return rows == 0 ? Results.NotFound() : Results.Ok(new { id, activeDirectory = false });
 }).RequireAuthorization();
 
+app.MapPost("/api/users/{id:int}/status", async (HttpContext http, int id, ActiveDirectoryService adService, ILogger<Program> logger) =>
+{
+    if (!http.User.IsInRole("Admin")) return Results.Forbid();
+
+    System.Text.Json.JsonElement body;
+    try { body = await System.Text.Json.JsonSerializer.DeserializeAsync<System.Text.Json.JsonElement>(http.Request.Body); }
+    catch { return Results.BadRequest(new { error = "Invalid payload" }); }
+
+    if (!body.TryGetProperty("enabled", out var enabledEl) || enabledEl.ValueKind is not System.Text.Json.JsonValueKind.True and not System.Text.Json.JsonValueKind.False)
+        return Results.BadRequest(new { error = "enabled is required" });
+
+    var enabled = enabledEl.GetBoolean();
+
+    if (!enabled)
+    {
+        var currentIdClaim = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (int.TryParse(currentIdClaim, out var currentId) && currentId == id)
+            return Results.BadRequest(new { error = "Vous ne pouvez pas desactiver votre propre compte." });
+    }
+
+    using var conn = DbHelpers.OpenConnection(GetDbPath());
+
+    string? name;
+    string? email;
+    string? role;
+    string? adSam;
+    string? adUpn;
+    using (var sel = conn.CreateCommand())
+    {
+        sel.CommandText = "SELECT Name, Email, Role, ADSamAccountName, ADUserPrincipalName FROM Users WHERE Id = $id";
+        sel.Parameters.AddWithValue("$id", id);
+        using var rdr = sel.ExecuteReader();
+        if (!rdr.Read()) return Results.NotFound();
+        name = rdr.IsDBNull(0) ? null : rdr.GetString(0);
+        email = rdr.IsDBNull(1) ? null : rdr.GetString(1);
+        role = rdr.IsDBNull(2) ? null : rdr.GetString(2);
+        adSam = rdr.IsDBNull(3) ? null : rdr.GetString(3);
+        adUpn = rdr.IsDBNull(4) ? null : rdr.GetString(4);
+    }
+
+    if (!enabled && role == "Admin")
+    {
+        using var count = conn.CreateCommand();
+        count.CommandText = "SELECT COUNT(1) FROM Users WHERE Role = 'Admin' AND COALESCE(AccountEnabled, 1) = 1 AND Id <> $id";
+        count.Parameters.AddWithValue("$id", id);
+        if (Convert.ToInt32(count.ExecuteScalar() ?? 0) <= 0)
+            return Results.BadRequest(new { error = "Impossible de desactiver le dernier admin actif." });
+    }
+
+    var isAdLinked = !string.IsNullOrWhiteSpace(adSam) || !string.IsNullOrWhiteSpace(adUpn);
+    if (isAdLinked)
+    {
+        if (!adService.IsEnabled)
+            return Results.BadRequest(new { error = "Active Directory n'est pas active; impossible de modifier un compte AD lie." });
+
+        try
+        {
+            adService.SetAccountEnabled(adSam ?? "", adUpn, enabled);
+        }
+        catch (ActiveDirectoryOperationException ex)
+        {
+            logger.LogWarning(ex, "Active Directory status update failed for user {UserId}", id);
+            return ActiveDirectoryErrorResult(ex);
+        }
+    }
+
+    using (var upd = conn.CreateCommand())
+    {
+        upd.CommandText = "UPDATE Users SET AccountEnabled = $enabled WHERE Id = $id";
+        upd.Parameters.AddWithValue("$enabled", enabled ? 1 : 0);
+        upd.Parameters.AddWithValue("$id", id);
+        upd.ExecuteNonQuery();
+    }
+
+    DbHelpers.WriteAudit(GetDbPath(), http.User?.Identity?.Name, enabled ? "UserEnable" : "UserDisable", $"User#{id}", $"{name ?? email ?? id.ToString()}");
+    return Results.Ok(new { id, accountEnabled = enabled, activeDirectory = isAdLinked });
+}).RequireAuthorization();
+
 app.MapDelete("/api/users/{id:int}", (HttpContext http, int id) =>
 {
     if (!http.User.IsInRole("Admin")) return Results.Forbid();
@@ -459,15 +568,18 @@ app.MapDelete("/api/users/{id:int}", (HttpContext http, int id) =>
 
     using (var chk = conn.CreateCommand())
     {
-        chk.CommandText = "SELECT Role FROM Users WHERE Id = $id";
+        chk.CommandText = "SELECT Role, COALESCE(AccountEnabled, 1) FROM Users WHERE Id = $id";
         chk.Parameters.AddWithValue("$id", id);
-        var r = chk.ExecuteScalar()?.ToString();
-        if (r == null) return Results.NotFound();
-        if (r == "Admin")
+        using var rdr = chk.ExecuteReader();
+        if (!rdr.Read()) return Results.NotFound();
+        var r = rdr.IsDBNull(0) ? null : rdr.GetString(0);
+        var isEnabled = rdr.IsDBNull(1) || rdr.GetInt32(1) == 1;
+        if (r == "Admin" && isEnabled)
         {
             using var cnt = conn.CreateCommand();
-            cnt.CommandText = "SELECT COUNT(1) FROM Users WHERE Role = 'Admin'";
-            if (Convert.ToInt32(cnt.ExecuteScalar() ?? 0) <= 1)
+            cnt.CommandText = "SELECT COUNT(1) FROM Users WHERE Role = 'Admin' AND COALESCE(AccountEnabled, 1) = 1 AND Id <> $id";
+            cnt.Parameters.AddWithValue("$id", id);
+            if (Convert.ToInt32(cnt.ExecuteScalar() ?? 0) <= 0)
                 return Results.BadRequest(new { error = "Cannot delete the last admin" });
         }
     }

@@ -23,11 +23,11 @@
       <table class="table table-hover align-middle mb-0">
         <thead class="table-light">
           <tr>
-            <th>#</th><th>Nom</th><th>Email</th><th>Role</th><th>AD</th><th>Verifie</th><th>Reservations</th><th class="text-end pe-3">Actions</th>
+            <th>#</th><th>Nom</th><th>Email</th><th>Role</th><th>AD</th><th>Etat</th><th>Verifie</th><th>Reservations</th><th class="text-end pe-3">Actions</th>
           </tr>
         </thead>
         <tbody id="usersBody">
-          <tr><td colspan="8" class="text-center text-muted py-4">Chargement...</td></tr>
+          <tr><td colspan="9" class="text-center text-muted py-4">Chargement...</td></tr>
         </tbody>
       </table>
     </div>
@@ -114,7 +114,7 @@
   const esc = s => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
   function render(items){
-    if (!items.length) { tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">Aucun utilisateur.</td></tr>'; return; }
+    if (!items.length) { tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">Aucun utilisateur.</td></tr>'; return; }
     tbody.innerHTML = '';
     for (const u of items){
       const tr = document.createElement('tr');
@@ -125,6 +125,11 @@
       const adCell = u.adSamAccountName
         ? `<span class="badge bg-primary-subtle text-primary border">AD</span><div class="small text-muted">${esc(u.adSamAccountName)}</div><div class="small text-muted">${esc(u.adUserPrincipalName)}</div>`
         : `<span class="badge bg-light text-dark border">Local</span>`;
+      const isActive = u.accountEnabled !== false;
+      const statusCell = isActive
+        ? `<span class="badge bg-success"><i class="bi bi-person-check me-1"></i>Actif</span>`
+        : `<span class="badge bg-secondary"><i class="bi bi-person-slash me-1"></i>Inactif</span>`;
+      if (!isActive) tr.classList.add('table-secondary');
       tr.innerHTML = `
         <td class="text-muted">#${u.id}</td>
         <td><input class="form-control form-control-sm inline-edit" data-id="${u.id}" data-field="name" value="${esc(u.name)}" /></td>
@@ -136,9 +141,11 @@
           <span class="ms-2">${roleBadge(u.role)}</span>
         </td>
         <td>${adCell}</td>
+        <td>${statusCell}</td>
         <td>${verifiedCell}</td>
         <td><span class="badge bg-light text-dark border">${u.bookings}</span></td>
         <td class="text-end pe-3 text-nowrap">
+          <button class="btn btn-sm ${isActive ? 'btn-outline-secondary' : 'btn-outline-success'} status-btn" data-id="${u.id}" data-enabled="${isActive ? 'false' : 'true'}" data-label="${esc(u.name || u.email)}" title="${isActive ? 'Desactiver le compte' : 'Reactiver le compte'}"><i class="bi ${isActive ? 'bi-person-slash' : 'bi-person-check'}"></i></button>
           <button class="btn btn-sm btn-outline-warning reset-btn" data-id="${u.id}" data-label="${esc(u.name || u.email)}" title="Reinitialiser le mot de passe"><i class="bi bi-key"></i></button>
           <button class="btn btn-sm btn-outline-danger del-btn" data-id="${u.id}" data-label="${esc(u.name || u.email)}" title="Supprimer l'utilisateur"><i class="bi bi-trash"></i></button>
         </td>`;
@@ -162,20 +169,20 @@
       const res = await fetch('/api/users', { credentials: 'include' });
       if (res.status === 401) { location.href = '/Login'; return; }
       if (res.status === 403) {
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-danger py-4">Role admin requis.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-danger py-4">Role admin requis.</td></tr>';
         return;
       }
       if (!res.ok) {
         const text = await res.text();
         console.error('GET /api/users failed', res.status, text);
-        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-4">Erreur API ${res.status}. Consultez la console navigateur et le log dotnet.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center text-danger py-4">Erreur API ${res.status}. Consultez la console navigateur et le log dotnet.</td></tr>`;
         return;
       }
       allUsers = await res.json();
       applyFilter();
     } catch (err) {
       console.error('Load users threw', err);
-      tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-4">${err.message || 'Network error'}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" class="text-center text-danger py-4">${err.message || 'Network error'}</td></tr>`;
     }
   }
 
@@ -212,6 +219,23 @@
     tbody.querySelectorAll('.verify-btn').forEach(b => b.addEventListener('click', async ()=>{
       const r = await fetch(`/api/users/${b.dataset.id}/verify-email`, { method: 'POST', credentials: 'include' });
       if (!r.ok) { alert('Verification impossible'); }
+      load();
+    }));
+
+    tbody.querySelectorAll('.status-btn').forEach(b => b.addEventListener('click', async ()=>{
+      const enabled = b.dataset.enabled === 'true';
+      const action = enabled ? 'reactiver' : 'desactiver';
+      if (!confirm(`Voulez-vous ${action} le compte "${b.dataset.label}" ?`)) return;
+      const r = await fetch(`/api/users/${b.dataset.id}/status`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        credentials: 'include',
+        body: JSON.stringify({ enabled })
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(()=>null);
+        alert(j?.error || 'Changement de statut impossible');
+      }
       load();
     }));
 
