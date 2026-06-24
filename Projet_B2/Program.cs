@@ -29,6 +29,7 @@ builder.Services.AddRazorPages(opts =>
 
 builder.Services.AddSingleton(sp => new InvoiceService(DbHelpers.GetDbPath(websitePath), invoicesDir, sp.GetRequiredService<IConfiguration>()));
 builder.Services.AddSingleton(sp => new EmailService(sp.GetRequiredService<IConfiguration>(), sp.GetRequiredService<ILogger<EmailService>>(), outboxDir));
+builder.Services.AddSingleton<ActiveDirectoryService>();
 builder.Services.AddHostedService(sp => new ReminderService(DbHelpers.GetDbPath(websitePath), sp.GetRequiredService<EmailService>(), sp.GetRequiredService<ILogger<ReminderService>>()));
 
 builder.WebHost.ConfigureKestrel(opts =>
@@ -60,6 +61,31 @@ app.MapRazorPages();
 
 string GetDbPath() => DbHelpers.GetDbPath(websitePath);
 
+static Claim[] BuildAuthClaims(int userId, string name, string role, string? email = null, string? adObjectGuid = null)
+{
+    var claims = new List<Claim>
+    {
+        new(ClaimTypes.NameIdentifier, userId.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        new(ClaimTypes.Name, name),
+        new(ClaimTypes.Role, role ?? string.Empty)
+    };
+    if (!string.IsNullOrWhiteSpace(email)) claims.Add(new Claim(ClaimTypes.Email, email));
+    if (!string.IsNullOrWhiteSpace(adObjectGuid)) claims.Add(new Claim("ad_object_guid", adObjectGuid));
+    return claims.ToArray();
+}
+
+static IResult ActiveDirectoryErrorResult(ActiveDirectoryOperationException ex)
+{
+    return ex.Kind switch
+    {
+        ActiveDirectoryErrorKind.Duplicate => Results.Conflict(new { error = ex.Message }),
+        ActiveDirectoryErrorKind.NotFound => Results.NotFound(new { error = ex.Message }),
+        ActiveDirectoryErrorKind.Validation => Results.BadRequest(new { error = ex.Message }),
+        ActiveDirectoryErrorKind.Configuration => Results.BadRequest(new { error = ex.Message }),
+        _ => Results.Problem(title: "Active Directory", detail: ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable)
+    };
+}
+
 var dbPath = GetDbPath();
 DbHelpers.InitializeDatabase(dbPath);
 DbHelpers.SeedAdminUser(dbPath);
@@ -67,7 +93,7 @@ DbHelpers.SeedDefaultSpaces(dbPath);
 
 // --- Auth endpoints ---
 
-app.MapPost("/api/login", async (HttpContext http) =>
+app.MapPost("/api/login", async (HttpContext http, ActiveDirectoryService adService, ILogger<Program> logger) =>
 {
     var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(http.Request.Body);
     if (body == null || !body.TryGetValue("username", out var username) || !body.TryGetValue("password", out var password))
@@ -77,18 +103,47 @@ app.MapPost("/api/login", async (HttpContext http) =>
     {
         using var conn = DbHelpers.OpenConnection(GetDbPath());
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT Name, Email, Role, PasswordHash FROM Users WHERE Email = $u OR Name = $u LIMIT 1";
+        cmd.CommandText = @"SELECT Id, Name, Email, Role, PasswordHash, ADSamAccountName, ADUserPrincipalName, ADObjectGuid
+                            FROM Users
+                            WHERE Email = $u OR Name = $u OR ADSamAccountName = $u OR ADUserPrincipalName = $u
+                            LIMIT 1";
         cmd.Parameters.AddWithValue("$u", username);
         using var rdr = cmd.ExecuteReader();
         if (rdr.Read())
         {
-            var name = rdr.IsDBNull(0) ? username : rdr.GetString(0);
-            var role = rdr.IsDBNull(2) ? string.Empty : rdr.GetString(2);
-            var ph = rdr.IsDBNull(3) ? string.Empty : rdr.GetString(3);
+            var id = rdr.GetInt32(0);
+            var name = rdr.IsDBNull(1) ? username : rdr.GetString(1);
+            var email = rdr.IsDBNull(2) ? null : rdr.GetString(2);
+            var role = rdr.IsDBNull(3) ? string.Empty : rdr.GetString(3);
+            var ph = rdr.IsDBNull(4) ? string.Empty : rdr.GetString(4);
+            var adSam = rdr.IsDBNull(5) ? null : rdr.GetString(5);
+            var adUpn = rdr.IsDBNull(6) ? null : rdr.GetString(6);
+            var adGuid = rdr.IsDBNull(7) ? null : rdr.GetString(7);
+            var isAdLinked = !string.IsNullOrWhiteSpace(adSam) || !string.IsNullOrWhiteSpace(adUpn);
+
+            if (isAdLinked && adService.IsEnabled)
+            {
+                try
+                {
+                    if (adService.ValidateCredentials(username, password, adSam, adUpn))
+                    {
+                        var identity = new ClaimsIdentity(BuildAuthClaims(id, name, role ?? "", email, adGuid), CookieAuthenticationDefaults.AuthenticationScheme);
+                        await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
+                        return Results.Ok(new { user = name });
+                    }
+                }
+                catch (ActiveDirectoryOperationException ex)
+                {
+                    logger.LogWarning(ex, "Active Directory login failed for {Username}", username);
+                    return ActiveDirectoryErrorResult(ex);
+                }
+
+                return Results.Unauthorized();
+            }
+
             if (!string.IsNullOrEmpty(ph) && DbHelpers.VerifyPassword(password, ph))
             {
-                var claims = new[] { new Claim(ClaimTypes.Name, name), new Claim(ClaimTypes.Role, role ?? "") };
-                var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+                var identity = new ClaimsIdentity(BuildAuthClaims(id, name, role ?? "", email, adGuid), CookieAuthenticationDefaults.AuthenticationScheme);
                 await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
                 return Results.Ok(new { user = name });
             }
@@ -150,7 +205,7 @@ app.MapPost("/api/signup", async (HttpContext http, EmailService emailSvc, ILogg
     ins.Parameters.AddWithValue("$tok", verifyToken);
     var id = Convert.ToInt32(ins.ExecuteScalar() ?? 0);
 
-    var claims = new[] { new Claim(ClaimTypes.Name, name), new Claim(ClaimTypes.Role, "User") };
+    var claims = BuildAuthClaims(id, name, "User", email);
     var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
     await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
 
@@ -188,7 +243,8 @@ app.MapGet("/api/users", (HttpContext http) =>
     using var cmd = conn.CreateCommand();
     cmd.CommandText = @"SELECT u.Id, u.Name, u.Last_Name, u.Email, u.Role,
                                (SELECT COUNT(1) FROM Reservation r WHERE r.OwnerId = u.Id) AS BookingsCount,
-                               COALESCE(u.EmailVerified, 0) AS EmailVerified
+                               COALESCE(u.EmailVerified, 0) AS EmailVerified,
+                               u.ADSamAccountName, u.ADUserPrincipalName, u.ADObjectGuid
                         FROM Users u ORDER BY u.Id";
     using var rdr = cmd.ExecuteReader();
     while (rdr.Read())
@@ -200,7 +256,10 @@ app.MapGet("/api/users", (HttpContext http) =>
             email = rdr.IsDBNull(3) ? null : rdr.GetString(3),
             role = rdr.IsDBNull(4) ? null : rdr.GetString(4),
             bookings = rdr.IsDBNull(5) ? 0 : rdr.GetInt32(5),
-            emailVerified = !rdr.IsDBNull(6) && rdr.GetInt32(6) == 1
+            emailVerified = !rdr.IsDBNull(6) && rdr.GetInt32(6) == 1,
+            adSamAccountName = rdr.IsDBNull(7) ? null : rdr.GetString(7),
+            adUserPrincipalName = rdr.IsDBNull(8) ? null : rdr.GetString(8),
+            adObjectGuid = rdr.IsDBNull(9) ? null : rdr.GetString(9)
         });
     }
     return Results.Ok(list);
@@ -253,7 +312,7 @@ app.MapPost("/api/users/{id:int}/resend-welcome", async (HttpContext http, int i
     return Results.Ok(new { id });
 }).RequireAuthorization();
 
-app.MapPost("/api/users", async (HttpContext http) =>
+app.MapPost("/api/users", async (HttpContext http, ActiveDirectoryService adService, ILogger<Program> logger) =>
 {
     if (!http.User.IsInRole("Admin")) return Results.Forbid();
     var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(http.Request.Body);
@@ -283,14 +342,35 @@ app.MapPost("/api/users", async (HttpContext http) =>
             return Results.Conflict(new { error = "Email already in use" });
     }
 
+    ActiveDirectoryUserLink adLink;
+    try
+    {
+        adLink = adService.CreateUser(name, email, password);
+    }
+    catch (ActiveDirectoryOperationException ex)
+    {
+        logger.LogWarning(ex, "Active Directory provisioning failed for {Email}", email);
+        return ActiveDirectoryErrorResult(ex);
+    }
+
     using var ins = conn.CreateCommand();
-    ins.CommandText = "INSERT INTO Users (Name, Email, Role, PasswordHash) VALUES ($n,$e,$r,$ph); SELECT last_insert_rowid();";
+    ins.CommandText = @"INSERT INTO Users (Name, Email, Role, PasswordHash, ADSamAccountName, ADUserPrincipalName, ADObjectGuid)
+                        VALUES ($n,$e,$r,$ph,$sam,$upn,$guid);
+                        SELECT last_insert_rowid();";
     ins.Parameters.AddWithValue("$n", name);
     ins.Parameters.AddWithValue("$e", email);
     ins.Parameters.AddWithValue("$r", role);
-    ins.Parameters.AddWithValue("$ph", DbHelpers.CreatePasswordHash(password));
+    ins.Parameters.AddWithValue("$ph", adLink.Created ? DBNull.Value : DbHelpers.CreatePasswordHash(password));
+    ins.Parameters.AddWithValue("$sam", (object?)adLink.SamAccountName ?? DBNull.Value);
+    ins.Parameters.AddWithValue("$upn", (object?)adLink.UserPrincipalName ?? DBNull.Value);
+    ins.Parameters.AddWithValue("$guid", (object?)adLink.ObjectGuid ?? DBNull.Value);
     var id = Convert.ToInt32(ins.ExecuteScalar() ?? 0);
-    return Results.Created($"/api/users/{id}", new { id, name, email, role });
+    return Results.Created($"/api/users/{id}", new {
+        id, name, email, role,
+        adSamAccountName = adLink.SamAccountName,
+        adUserPrincipalName = adLink.UserPrincipalName,
+        adObjectGuid = adLink.ObjectGuid
+    });
 }).RequireAuthorization();
 
 app.MapPut("/api/users/{id:int}", async (HttpContext http, int id) =>
@@ -322,7 +402,7 @@ app.MapPut("/api/users/{id:int}", async (HttpContext http, int id) =>
     return rows == 0 ? Results.NotFound() : Results.Ok(new { id });
 }).RequireAuthorization();
 
-app.MapPost("/api/users/{id:int}/reset-password", async (HttpContext http, int id) =>
+app.MapPost("/api/users/{id:int}/reset-password", async (HttpContext http, int id, ActiveDirectoryService adService, ILogger<Program> logger) =>
 {
     if (!http.User.IsInRole("Admin")) return Results.Forbid();
     var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(http.Request.Body);
@@ -331,12 +411,45 @@ app.MapPost("/api/users/{id:int}/reset-password", async (HttpContext http, int i
         return Results.BadRequest(new { error = "Password must be at least 6 characters" });
 
     using var conn = DbHelpers.OpenConnection(GetDbPath());
+
+    string? adSam = null;
+    string? adUpn = null;
+    using (var sel = conn.CreateCommand())
+    {
+        sel.CommandText = "SELECT ADSamAccountName, ADUserPrincipalName FROM Users WHERE Id = $id";
+        sel.Parameters.AddWithValue("$id", id);
+        using var rdr = sel.ExecuteReader();
+        if (!rdr.Read()) return Results.NotFound();
+        adSam = rdr.IsDBNull(0) ? null : rdr.GetString(0);
+        adUpn = rdr.IsDBNull(1) ? null : rdr.GetString(1);
+    }
+
+    var isAdLinked = !string.IsNullOrWhiteSpace(adSam) || !string.IsNullOrWhiteSpace(adUpn);
+    if (isAdLinked)
+    {
+        try
+        {
+            adService.SetPassword(adSam ?? "", adUpn, password);
+        }
+        catch (ActiveDirectoryOperationException ex)
+        {
+            logger.LogWarning(ex, "Active Directory password reset failed for user {UserId}", id);
+            return ActiveDirectoryErrorResult(ex);
+        }
+
+        using var clear = conn.CreateCommand();
+        clear.CommandText = "UPDATE Users SET PasswordHash = NULL WHERE Id = $id";
+        clear.Parameters.AddWithValue("$id", id);
+        clear.ExecuteNonQuery();
+        return Results.Ok(new { id, activeDirectory = true });
+    }
+
     using var cmd = conn.CreateCommand();
     cmd.CommandText = "UPDATE Users SET PasswordHash = $ph WHERE Id = $id";
     cmd.Parameters.AddWithValue("$ph", DbHelpers.CreatePasswordHash(password));
     cmd.Parameters.AddWithValue("$id", id);
     var rows = cmd.ExecuteNonQuery();
-    return rows == 0 ? Results.NotFound() : Results.Ok(new { id });
+    return rows == 0 ? Results.NotFound() : Results.Ok(new { id, activeDirectory = false });
 }).RequireAuthorization();
 
 app.MapDelete("/api/users/{id:int}", (HttpContext http, int id) =>

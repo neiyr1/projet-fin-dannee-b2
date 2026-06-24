@@ -196,11 +196,13 @@ document.addEventListener('DOMContentLoaded', () => {
       out.innerHTML = '';
       if (!items.length) { out.innerHTML = 'Aucune reservation pour cette date'; return; }
       const ul = document.createElement('ul');
+      ul.className = 'booking-list';
       items.forEach(it=>{
         const li = document.createElement('li');
+        li.className = 'booking-list-item';
         const start = it.startHour ?? (it.start ? new Date(it.start).getHours() : 0);
         const hours = it.hours ?? Math.max(1, Math.round((new Date(it.end)-new Date(it.start))/3600000));
-        li.textContent = `${it.date || ''} ${start}:00 pendant ${hours}h — ${it.ownerName || it.status || ''}`;
+        li.innerHTML = `<div><strong>${String(start).padStart(2,'0')}:00</strong> <span class="text-muted">pendant ${hours}h</span><div class="small text-muted">${it.date || ''} - ${it.ownerName || it.status || ''}</div></div>`;
         if (it.status === 'Booked') {
           const btn = document.createElement('button');
           btn.textContent = 'Annuler';
@@ -263,26 +265,38 @@ document.addEventListener('DOMContentLoaded', () => {
       // build days
       const days = [];
       for (let i=0;i<7;i++){ days.push(addDays(weekStart,i)); }
-      lbl.textContent = `${days[0].toISOString().slice(0,10)} a ${days[6].toISOString().slice(0,10)}`;
+      lbl.textContent = `Semaine du ${days[0].toLocaleDateString('fr-FR')} au ${days[6].toLocaleDateString('fr-FR')}`;
 
       // fetch bookings for each day in parallel
       const promises = days.map(d => fetch(`/api/reservations/space?spaceId=${sp}&date=${d.toISOString().slice(0,10)}`, { credentials: 'include' }).then(r=> r.ok? r.json(): []));
       const results = await Promise.all(promises);
 
       grid.innerHTML = '';
-      // mark grid container for styling
       grid.classList.add('availability-grid');
-      const table = document.createElement('table'); table.className = 'table table-sm table-responsive';
+      const table = document.createElement('table'); table.className = 'calendar-week-table';
       const thead = document.createElement('thead');
       const headRow = document.createElement('tr');
-      headRow.innerHTML = '<th style="width:60px">Heure</th>' + days.map(d=>`<th>${d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}</th>`).join('');
+      headRow.innerHTML = '<th class="time-head">Heure</th>' + days.map(d=>`<th><span>${d.toLocaleDateString('fr-FR',{weekday:'short'})}</span><strong>${d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})}</strong></th>`).join('');
       thead.appendChild(headRow); table.appendChild(thead);
 
       const tbody = document.createElement('tbody');
+      const selectSlot = (cell, day, hour, isFull) => {
+        if (isFull) {
+          document.getElementById('bookingMsg').textContent = `Creneau complet : ${day.toISOString().slice(0,10)} ${hour}:00`;
+          return;
+        }
+        grid.querySelectorAll('.slot-cell.is-selected').forEach(x => x.classList.remove('is-selected'));
+        cell.classList.add('is-selected');
+        dateInput.value = day.toISOString().slice(0,10);
+        startInput.value = String(hour);
+        hoursInput.value = '1';
+        updatePricePreview();
+        document.getElementById('bookingMsg').textContent = `Creneau selectionne : ${dateInput.value} ${hour}:00`;
+      };
       // show hours from 7:00 to 21:00 only
       for (let h=7; h<=21; h++){
         const tr = document.createElement('tr');
-        const th = document.createElement('th'); th.textContent = `${h}:00`; tr.appendChild(th);
+        const th = document.createElement('th'); th.className = 'time-cell'; th.textContent = `${String(h).padStart(2,'0')}:00`; tr.appendChild(th);
         for (let di=0; di<7; di++){
           const cell = document.createElement('td');
           const dayBookings = results[di] || [];
@@ -293,18 +307,19 @@ document.addEventListener('DOMContentLoaded', () => {
             return (h >= s) && (h < s+hrs) && (b.status === 'Booked');
           });
           const count = bookingsAtHour.length;
-          // semantic classes for styling
-          if (count >= room.capacity) {
-            cell.className = 'occupied full';
-            cell.innerHTML = '<span class="cell-icon">X</span>';
+          const capacity = Math.max(1, parseInt(room.capacity, 10) || 1);
+          const isFull = count >= capacity;
+          if (isFull) {
+            cell.className = 'slot-cell is-full';
+            cell.innerHTML = `<span class="slot-status">Complet</span><span class="slot-count">${count}/${capacity}</span>`;
           }
           else if (count > 0) {
-            cell.className = 'occupied partial';
-            cell.innerHTML = `<span class="cell-count">${count}</span>`;
+            cell.className = 'slot-cell is-partial';
+            cell.innerHTML = `<span class="slot-status">Partiel</span><span class="slot-count">${count}/${capacity}</span>`;
           }
           else {
-            cell.className = 'free';
-            cell.innerHTML = '<span class="cell-icon">OK</span>';
+            cell.className = 'slot-cell is-free';
+            cell.innerHTML = '<span class="slot-status">Libre</span><span class="slot-count">0</span>';
           }
 
           // tooltip and click-to-select
@@ -314,21 +329,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const st = bk.status || 'Booked';
               cell.title = `${owner} - ${st}`;
             cell.style.cursor = 'pointer';
-            cell.addEventListener('click', ()=>{
-              dateInput.value = days[di].toISOString().slice(0,10);
-              startInput.value = String(h);
-              hoursInput.value = '1';
-              document.getElementById('bookingMsg').textContent = `Creneau selectionne : ${dateInput.value} ${h}:00`;
-            });
+            cell.addEventListener('click', ()=> selectSlot(cell, days[di], h, isFull));
           } else {
             // free cell click selects it too
             cell.style.cursor = 'pointer';
-            cell.addEventListener('click', ()=>{
-              dateInput.value = days[di].toISOString().slice(0,10);
-              startInput.value = String(h);
-              hoursInput.value = '1';
-              document.getElementById('bookingMsg').textContent = `Creneau selectionne : ${dateInput.value} ${h}:00`;
-            });
+            cell.addEventListener('click', ()=> selectSlot(cell, days[di], h, false));
           }
 
           tr.appendChild(cell);
@@ -338,7 +343,7 @@ document.addEventListener('DOMContentLoaded', () => {
       table.appendChild(tbody);
       grid.appendChild(table);
       // update legend / capacity indicator
-      updateLegend(room.capacity);
+      updateLegend(Math.max(1, parseInt(room.capacity, 10) || 1));
     }
 
     function updateLegend(capacity){
@@ -350,7 +355,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const form = document.querySelector('#bookingContainer') || container;
         (form || container).appendChild(legend);
       }
-      legend.innerHTML = `<div class="d-flex gap-2 align-items-center"><span class="legend-item"><span class="badge bg-success me-1">OK</span> Libre</span><span class="legend-item"><span class="badge bg-warning text-dark me-1">#</span> Partiel</span><span class="legend-item"><span class="badge bg-danger me-1">X</span> Complet (capacite ${capacity})</span></div>`;
+      legend.innerHTML = `<div class="calendar-legend"><span><i class="legend-dot free"></i>Libre</span><span><i class="legend-dot partial"></i>Partiel</span><span><i class="legend-dot full"></i>Complet (capacite ${capacity})</span></div>`;
     }
 
     function initFullCalendar(target){

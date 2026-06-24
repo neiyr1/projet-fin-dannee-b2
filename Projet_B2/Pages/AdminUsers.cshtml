@@ -23,11 +23,11 @@
       <table class="table table-hover align-middle mb-0">
         <thead class="table-light">
           <tr>
-            <th>#</th><th>Nom</th><th>Email</th><th>Role</th><th>Verifie</th><th>Reservations</th><th class="text-end pe-3">Actions</th>
+            <th>#</th><th>Nom</th><th>Email</th><th>Role</th><th>AD</th><th>Verifie</th><th>Reservations</th><th class="text-end pe-3">Actions</th>
           </tr>
         </thead>
         <tbody id="usersBody">
-          <tr><td colspan="7" class="text-center text-muted py-4">Chargement...</td></tr>
+          <tr><td colspan="8" class="text-center text-muted py-4">Chargement...</td></tr>
         </tbody>
       </table>
     </div>
@@ -65,7 +65,7 @@
           <div class="mb-3">
             <label class="form-label">Mot de passe initial</label>
             <input name="password" class="form-control" minlength="6" placeholder="changeme123" />
-            <div class="form-text">Laisser vide pour utiliser <code>changeme123</code>.</div>
+            <div class="form-text">Utilise pour le compte AD si l'Active Directory est active. Laisser vide pour <code>changeme123</code>.</div>
           </div>
           <div id="newUserMsg" class="text-danger small"></div>
         </div>
@@ -114,7 +114,7 @@
   const esc = s => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
   function render(items){
-    if (!items.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Aucun utilisateur.</td></tr>'; return; }
+    if (!items.length) { tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">Aucun utilisateur.</td></tr>'; return; }
     tbody.innerHTML = '';
     for (const u of items){
       const tr = document.createElement('tr');
@@ -122,6 +122,9 @@
         ? `<span class="badge status-booked"><i class="bi bi-check-circle me-1"></i>Verifie</span>`
         : `<span class="badge status-pending"><i class="bi bi-clock-history me-1"></i>En attente</span>
            <button class="btn btn-sm btn-outline-success ms-1 verify-btn" data-id="${u.id}" title="Marquer comme verifie"><i class="bi bi-check2"></i></button>`;
+      const adCell = u.adSamAccountName
+        ? `<span class="badge bg-primary-subtle text-primary border">AD</span><div class="small text-muted">${esc(u.adSamAccountName)}</div><div class="small text-muted">${esc(u.adUserPrincipalName)}</div>`
+        : `<span class="badge bg-light text-dark border">Local</span>`;
       tr.innerHTML = `
         <td class="text-muted">#${u.id}</td>
         <td><input class="form-control form-control-sm inline-edit" data-id="${u.id}" data-field="name" value="${esc(u.name)}" /></td>
@@ -132,6 +135,7 @@
           </select>
           <span class="ms-2">${roleBadge(u.role)}</span>
         </td>
+        <td>${adCell}</td>
         <td>${verifiedCell}</td>
         <td><span class="badge bg-light text-dark border">${u.bookings}</span></td>
         <td class="text-end pe-3 text-nowrap">
@@ -158,20 +162,20 @@
       const res = await fetch('/api/users', { credentials: 'include' });
       if (res.status === 401) { location.href = '/Login'; return; }
       if (res.status === 403) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Role admin requis.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-danger py-4">Role admin requis.</td></tr>';
         return;
       }
       if (!res.ok) {
         const text = await res.text();
         console.error('GET /api/users failed', res.status, text);
-        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-4">Erreur API ${res.status}. Consultez la console navigateur et le log dotnet.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-4">Erreur API ${res.status}. Consultez la console navigateur et le log dotnet.</td></tr>`;
         return;
       }
       allUsers = await res.json();
       applyFilter();
     } catch (err) {
       console.error('Load users threw', err);
-      tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-4">${err.message || 'Network error'}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-4">${err.message || 'Network error'}</td></tr>`;
     }
   }
 

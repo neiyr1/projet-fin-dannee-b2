@@ -219,7 +219,12 @@ CREATE TABLE IF NOT EXISTS Reminders (
         using var rdr = pragma.ExecuteReader();
         var has = new Dictionary<string, bool>
         {
-            ["passwordhash"] = false, ["emailverified"] = false, ["emailverifytoken"] = false
+            ["passwordhash"] = false,
+            ["emailverified"] = false,
+            ["emailverifytoken"] = false,
+            ["adsamaccountname"] = false,
+            ["aduserprincipalname"] = false,
+            ["adobjectguid"] = false
         };
         while (rdr.Read())
         {
@@ -232,7 +237,10 @@ CREATE TABLE IF NOT EXISTS Reminders (
         {
             ["passwordhash"] = "ALTER TABLE Users ADD COLUMN PasswordHash TEXT;",
             ["emailverified"] = "ALTER TABLE Users ADD COLUMN EmailVerified INTEGER NOT NULL DEFAULT 0;",
-            ["emailverifytoken"] = "ALTER TABLE Users ADD COLUMN EmailVerifyToken TEXT;"
+            ["emailverifytoken"] = "ALTER TABLE Users ADD COLUMN EmailVerifyToken TEXT;",
+            ["adsamaccountname"] = "ALTER TABLE Users ADD COLUMN ADSamAccountName TEXT;",
+            ["aduserprincipalname"] = "ALTER TABLE Users ADD COLUMN ADUserPrincipalName TEXT;",
+            ["adobjectguid"] = "ALTER TABLE Users ADD COLUMN ADObjectGuid TEXT;"
         };
 
         foreach (var (key, sql) in migrations)
@@ -243,6 +251,15 @@ CREATE TABLE IF NOT EXISTS Reminders (
                 alter.CommandText = sql;
                 alter.ExecuteNonQuery();
             }
+        }
+
+        using (var idx = conn.CreateCommand())
+        {
+            idx.CommandText = @"
+CREATE UNIQUE INDEX IF NOT EXISTS UX_Users_ADSamAccountName ON Users(ADSamAccountName) WHERE ADSamAccountName IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS UX_Users_ADUserPrincipalName ON Users(ADUserPrincipalName) WHERE ADUserPrincipalName IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS UX_Users_ADObjectGuid ON Users(ADObjectGuid) WHERE ADObjectGuid IS NOT NULL;";
+            idx.ExecuteNonQuery();
         }
     }
 

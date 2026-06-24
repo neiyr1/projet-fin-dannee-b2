@@ -86,24 +86,26 @@
           </div>
         </div>
       </div>
-
-      <div class="card">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-center mb-2">
-            <div>
-              <button id="prevWeek" class="btn btn-sm btn-outline-secondary">&larr;</button>
-              <button id="todayBtn" class="btn btn-sm btn-outline-primary">Aujourd'hui</button>
-              <button id="nextWeek" class="btn btn-sm btn-outline-secondary">&rarr;</button>
-            </div>
-            <div class="fw-semibold" id="weekLabel">Semaine</div>
-            <div></div>
-          </div>
-          <div id="weekView" class="availability-grid"></div>
-        </div>
-      </div>
     </div>
 
     <div class="col-md-7">
+      <div class="card calendar-card mb-3">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+            <div>
+              <h6 class="mb-1"><i class="bi bi-calendar-week me-2 text-primary"></i>Disponibilites de la semaine</h6>
+              <div class="text-muted small">Cliquez sur un creneau pour pre-remplir la reservation.</div>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <button id="prevWeek" class="btn btn-sm btn-outline-secondary" title="Semaine precedente"><i class="bi bi-chevron-left"></i></button>
+              <button id="todayBtn" class="btn btn-sm btn-outline-primary">Aujourd'hui</button>
+              <button id="nextWeek" class="btn btn-sm btn-outline-secondary" title="Semaine suivante"><i class="bi bi-chevron-right"></i></button>
+            </div>
+          </div>
+          <div class="calendar-week-label" id="weekLabel">Semaine</div>
+          <div id="weekView" class="availability-grid calendar-grid-wrap"></div>
+        </div>
+      </div>
       <div id="bookedListArea" class="card card-body">
         <h6 class="mb-2">Reservations du creneau</h6>
         <div id="bookedList">Selectionnez une date ou un espace pour voir les reservations</div>

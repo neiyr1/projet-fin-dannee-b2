@@ -216,6 +216,130 @@ p { color: var(--ink-soft); line-height: 1.6; }
 .availability-grid td .cell-count { display: inline-block; font-weight: 700; padding: 4px 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.3); }
 .availability-grid td:hover { transform: translateY(-2px); transition: transform .12s ease; }
 
+.calendar-card { overflow: hidden; }
+.calendar-week-label {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: .75rem;
+  padding: .35rem .65rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 700;
+  font-size: .85rem;
+}
+.calendar-grid-wrap { overflow-x: auto; padding-bottom: .25rem; }
+.calendar-week-table {
+  min-width: 760px;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 6px;
+  table-layout: fixed;
+}
+.calendar-week-table th {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: .75rem;
+  text-transform: uppercase;
+}
+.calendar-week-table thead th:not(.time-head) {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .55rem .35rem;
+}
+.calendar-week-table thead th span,
+.calendar-week-table thead th strong {
+  display: block;
+  line-height: 1.15;
+}
+.calendar-week-table thead th strong {
+  color: var(--ink);
+  font-size: .9rem;
+  margin-top: .1rem;
+}
+.calendar-week-table .time-cell {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 70px;
+  background: #fff;
+  color: var(--muted);
+  font-weight: 700;
+  border-radius: 8px;
+}
+.calendar-week-table .slot-cell {
+  height: 54px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+}
+.calendar-week-table .slot-cell:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, .10);
+}
+.calendar-week-table .slot-cell.is-selected {
+  outline: 3px solid rgba(0, 86, 210, .28);
+  border-color: var(--accent);
+}
+.calendar-week-table .slot-cell.is-free {
+  background: #ecfdf3;
+  color: #166534;
+}
+.calendar-week-table .slot-cell.is-partial {
+  background: #fff7e6;
+  color: #8a4b00;
+}
+.calendar-week-table .slot-cell.is-full {
+  background: #feecef;
+  color: #b42318;
+}
+.slot-status,
+.slot-count {
+  display: block;
+  line-height: 1.15;
+}
+.slot-status { font-weight: 700; font-size: .82rem; }
+.slot-count { font-size: .72rem; opacity: .78; margin-top: .15rem; }
+.calendar-legend {
+  display: flex;
+  gap: .75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: .8rem;
+  color: var(--muted);
+  font-size: .85rem;
+}
+.legend-dot {
+  display: inline-block;
+  width: .65rem;
+  height: .65rem;
+  border-radius: 999px;
+  margin-right: .35rem;
+}
+.legend-dot.free { background: #22c55e; }
+.legend-dot.partial { background: #f59e0b; }
+.legend-dot.full { background: #ef4444; }
+.booking-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: .5rem;
+}
+.booking-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .75rem;
+  padding: .65rem .75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
 /* ---------- Map preview ---------- */
 .map-preview-btn { min-width: 120px; }
 .modal-body #bookingContainer { display: block !important; }
