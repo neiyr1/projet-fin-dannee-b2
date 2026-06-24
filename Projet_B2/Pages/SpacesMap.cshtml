@@ -1,13 +1,16 @@
 @page
-@{ Layout = "_Layout"; ViewData["Title"] = "Spaces Map"; }
-<div class="d-flex justify-content-between align-items-center mb-3">
+@{ Layout = "_Layout"; ViewData["Title"] = "Plan"; }
+<div class="page-heading">
   <div class="d-flex align-items-center gap-3">
     <img src="~/images/Logo_1_mini.svg" asp-append-version="true" alt="Logo" style="height:36px" />
-    <h1 class="h4 mb-0">Spaces Map</h1>
+    <div>
+      <h1 class="h4 mb-0">Plan des espaces</h1>
+      <div class="text-muted small">Visualisation rapide des salles et acces a la reservation.</div>
+    </div>
   </div>
   <div class="d-flex gap-2">
-    <input id="search" placeholder="Search spaces" class="form-control form-control-sm" style="min-width:200px" />
-    <button id="refresh" class="btn btn-sm btn-outline-secondary">Refresh</button>
+    <input id="search" placeholder="Rechercher un espace" class="form-control form-control-sm" style="min-width:200px" />
+    <button id="refresh" class="btn btn-sm btn-outline-secondary">Actualiser</button>
   </div>
   <div id="count" class="text-muted small"></div>
 </div>
@@ -16,18 +19,18 @@
   <aside class="col-md-3">
     <div class="card sticky-top" style="top:90px;">
       <div class="card-body">
-        <h6 class="text-muted">Spaces</h6>
+        <h6 class="text-muted">Espaces</h6>
         <ul id="spaceList" class="list-group"></ul>
       </div>
     </div>
   </aside>
 
   <section class="col-md-9">
-    <div id="mapContainer" class="card mb-2 shadow-sm" style="min-height:300px" aria-label="Co-working spaces map"></div>
+    <div id="mapContainer" class="card mb-2 shadow-sm" style="min-height:300px" aria-label="Plan des espaces de coworking"></div>
     <div id="detailPanel" class="detail-panel mt-2"></div>
     <div class="card mt-3">
       <div class="card-body">
-        <h6>Booking calendar</h6>
+        <h6>Calendrier de reservation</h6>
         <div id="bookingContainer" style="display:none">
           <div class="row g-2 mb-2">
             <div class="col-auto">
@@ -43,11 +46,11 @@
               <input id="hoursInput" type="number" class="form-control form-control-sm" style="width:80px" />
             </div>
             <div class="col-auto">
-              <button id="bookBtn" class="btn btn-sm btn-primary">Book</button>
+              <button id="bookBtn" class="btn btn-sm btn-primary">Reserver</button>
             </div>
             <div class="col-auto"><div id="bookingMsg" class="small text-muted"></div></div>
           </div>
-          <div id="weekControls" class="mb-2 d-flex gap-2 align-items-center"><button id="prevWeek" class="btn btn-sm btn-outline-secondary">&lt;</button><button id="todayBtn" class="btn btn-sm btn-outline-primary">Today</button><div id="weekLabel" class="fw-bold"></div><button id="nextWeek" class="btn btn-sm btn-outline-secondary">&gt;</button></div>
+          <div id="weekControls" class="mb-2 d-flex gap-2 align-items-center"><button id="prevWeek" class="btn btn-sm btn-outline-secondary">&lt;</button><button id="todayBtn" class="btn btn-sm btn-outline-primary">Aujourd'hui</button><div id="weekLabel" class="fw-bold"></div><button id="nextWeek" class="btn btn-sm btn-outline-secondary">&gt;</button></div>
           <div id="weekView" style="overflow:auto"></div>
         </div>
       </div>
@@ -55,9 +58,10 @@
   </section>
 </div>
 
-<div class="mt-3">
-  <span class="badge bg-success">Available</span>
-  <span class="badge bg-secondary">Occupied</span>
+<div class="mt-3 d-flex gap-2 align-items-center">
+  <span class="badge bg-success">Libre</span>
+  <span class="badge bg-warning text-dark">Partiel</span>
+  <span class="badge bg-danger">Complet</span>
 </div>
 
-<p class="mt-3"><a href="/Spaces">Back to list</a></p>
+<p class="mt-3"><a href="/Spaces">Retour au catalogue</a></p>

@@ -12,23 +12,60 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let rooms = [];
 
-    async function loadSpaces(){
-      const res = await fetch('/api/rooms', { credentials: 'include' });
-      if (!res.ok) return;
-      rooms = await res.json();
+    let typeFilter = '';
+
+    function applyTypeFilter(){
+      const filtered = typeFilter ? rooms.filter(r => r.type === typeFilter) : rooms;
       spaceSel.innerHTML = '';
-      for (const s of rooms){
+      for (const s of filtered){
         const opt = document.createElement('option');
-        opt.value = s.id; opt.textContent = `${s.name} (cap ${s.capacity})`;
+        const priceLabel = (s.pricePerHour != null) ? ` - ${s.pricePerHour.toFixed(2)} EUR/h` : '';
+        const typeLabel = s.type ? ` - ${s.type}` : '';
+        opt.value = s.id; opt.textContent = `${s.name} (cap. ${s.capacity})${typeLabel}${priceLabel}`;
         spaceSel.appendChild(opt);
       }
-      spaceSel.addEventListener('change', ()=> { fetchBookedSlots(); renderWeek(); });
+      updatePricePreview();
+      loadEquipments();
+    }
+
+    async function loadEquipments(){
+      const eq = document.getElementById('spaceEquipments');
+      if (!eq || !spaceSel.value) { if (eq) eq.textContent = ''; return; }
+      try {
+        const res = await fetch(`/api/spaces/${spaceSel.value}/resources`, { credentials: 'include' });
+        if (!res.ok) { eq.textContent = ''; return; }
+        const items = await res.json();
+        if (!items.length) { eq.innerHTML = '<i class="bi bi-info-circle me-1"></i>Aucun equipement renseigne'; return; }
+        eq.innerHTML = items.map(r => `<span class="badge bg-light text-dark border me-1"><i class="bi bi-tools me-1"></i>${r.name}${r.quantity > 1 ? ' x' + r.quantity : ''}</span>`).join('');
+      } catch { eq.textContent = ''; }
+    }
+
+    document.querySelectorAll('#typeFilter input').forEach(r => r.addEventListener('change', e => {
+      typeFilter = e.target.value;
+      applyTypeFilter();
+    }));
+
+    document.querySelectorAll('[data-slot]').forEach(btn => btn.addEventListener('click', () => {
+      const slot = btn.dataset.slot;
+      if (slot === 'morning'){ startInput.value = 9; hoursInput.value = 4; }
+      if (slot === 'afternoon'){ startInput.value = 14; hoursInput.value = 4; }
+      if (slot === 'day'){ startInput.value = 9; hoursInput.value = 9; }
+      updatePricePreview();
+    }));
+
+    async function loadSpaces(){
+      const res = await fetch('/api/spaces', { credentials: 'include' });
+      if (!res.ok) return;
+      rooms = await res.json();
+      applyTypeFilter();
+      spaceSel.addEventListener('change', ()=> { fetchBookedSlots(); renderWeek(); loadEquipments(); updatePricePreview(); });
       // if page was opened with query params (from map), pre-select values
       try {
         const params = new URLSearchParams(window.location.search);
         const sid = params.get('spaceId');
         const d = params.get('date');
         const s = params.get('start');
+        const h = params.get('hours');
         if (sid) {
           // set if option exists
           const opt = Array.from(spaceSel.options).find(o=>o.value===sid || o.value===String(Number(sid)));
@@ -40,6 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (d) dateInput.value = d;
         if (s) startInput.value = s;
+        if (h) hoursInput.value = h;
       } catch (e) { /* ignore */ }
     }
 
@@ -74,63 +112,104 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     })();
 
+    function updatePricePreview(){
+      const priceTotal = document.getElementById('priceTotal');
+      const priceDetail = document.getElementById('priceDetail');
+      if (!priceTotal) return;
+      const sp = rooms.find(r => String(r.id) === String(spaceSel.value));
+      const hours = Math.max(1, parseInt(hoursInput.value,10) || 1);
+      const rate = sp?.pricePerHour ?? 0;
+      const ht = rate * hours;
+      const ttc = ht * 1.20;
+      priceTotal.textContent = `${ttc.toFixed(2)} EUR TTC`;
+      priceDetail.textContent = sp ? `(${rate.toFixed(2)} EUR/h x ${hours}h - HT ${ht.toFixed(2)} EUR)` : '';
+    }
+
+    function validateSelection(){
+      const start = parseInt(startInput.value, 10);
+      const hours = parseInt(hoursInput.value, 10);
+      if (!spaceSel.value) return 'Choisissez un espace.';
+      if (!dateInput.value) return 'Choisissez une date.';
+      if (!Number.isInteger(start) || start < 7 || start > 21) return 'Choisissez une heure entre 7h et 21h.';
+      if (!Number.isInteger(hours) || hours < 1 || hours > 12) return 'La duree doit etre comprise entre 1h et 12h.';
+      if (start + hours > 22) return 'Le creneau doit se terminer au plus tard a 22h.';
+      return null;
+    }
+
+    spaceSel.addEventListener('change', updatePricePreview);
+    hoursInput.addEventListener('input', updatePricePreview);
+
     bookBtn.addEventListener('click', async (e)=>{
       e.preventDefault();
       const spaceId = parseInt(spaceSel.value, 10);
       const startHour = parseInt(startInput.value, 10);
       const hoursVal = parseInt(hoursInput.value, 10);
       const dateVal = dateInput.value;
-      if (!dateVal) { msg.textContent = 'Please select a date.'; msg.style.color='red'; return; }
-      if (isNaN(spaceId) || spaceId <= 0) { msg.textContent = 'Please select a room.'; msg.style.color='red'; return; }
-      if (isNaN(startHour) || startHour < 7 || startHour > 21) { msg.textContent = 'Start hour must be between 7 and 21.'; msg.style.color='red'; return; }
-      if (isNaN(hoursVal) || hoursVal < 1) { msg.textContent = 'Duration must be at least 1 hour.'; msg.style.color='red'; return; }
-      if (startHour + hoursVal > 24) { msg.textContent = 'Booking cannot extend past midnight.'; msg.style.color='red'; return; }
+      const validationError = validateSelection();
+      if (validationError) {
+        msg.style.color = 'red';
+        msg.textContent = validationError;
+        return;
+      }
+      bookBtn.disabled = true;
+      msg.style.color = '';
+      msg.textContent = 'Reservation en cours...';
+      const attendeesText = (document.getElementById('attendeesInput')?.value || '').trim();
+      const attendees = attendeesText ? attendeesText.split(/[,;\s]+/).filter(s => s.includes('@')) : [];
       const payload = {
         spaceId,
         date: dateVal,
         startHour,
-        hours: hoursVal
+        hours: hoursVal,
+        attendees
       };
-      const res = await fetch('/api/reservations', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload), credentials: 'include' });
-      if (res.ok){
-        msg.textContent = 'Booked ✓'; msg.style.color='green';
-        await fetchBookedSlots(); renderWeek();
-      } else if (res.status === 409) {
-        const j = await res.json().catch(()=>null);
-        msg.textContent = j?.error || 'Time conflict';
-        msg.style.color = 'red';
-      } else {
-        const j = await res.json().catch(()=>null);
-        msg.textContent = j?.error || 'Booking failed'; msg.style.color='red';
+      try {
+        const res = await fetch('/api/reservations', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload), credentials: 'include' });
+        if (res.ok){
+          const data = await res.json().catch(()=>null);
+          const inv = data?.invoiceNumber ? ` - Facture ${data.invoiceNumber}` : '';
+          msg.innerHTML = `Reservation confirmee${inv} <a href="/MyReservations" class="ms-2">Voir mes reservations</a>`;
+          msg.style.color = 'green';
+          await fetchBookedSlots(); renderWeek();
+        } else if (res.status === 409) {
+          const j = await res.json().catch(()=>null);
+          msg.textContent = j?.error || 'Creneau deja reserve';
+          msg.style.color = 'red';
+        } else {
+          const j = await res.json().catch(()=>null);
+          msg.textContent = j?.error || 'Reservation impossible'; msg.style.color='red';
+        }
+      } finally {
+        bookBtn.disabled = false;
       }
     });
 
     async function fetchBookedSlots(){
       const out = document.getElementById('bookedList') || createBookedList();
-      out.innerHTML = 'Loading...';
+      out.innerHTML = 'Chargement...';
       const sp = parseInt(spaceSel.value,10);
-      if (!sp) { out.innerHTML = 'No space selected'; return; }
+      if (!sp) { out.innerHTML = 'Aucun espace selectionne'; return; }
       const d = dateInput.value || new Date().toISOString().slice(0,10);
       const res = await fetch(`/api/reservations/space?spaceId=${sp}&date=${encodeURIComponent(d)}`, { credentials: 'include' });
-      if (!res.ok) { out.innerHTML = 'Failed to load bookings'; return; }
+      if (!res.ok) { out.innerHTML = 'Chargement des reservations impossible'; return; }
       const items = await res.json();
       out.innerHTML = '';
-      if (!items.length) { out.innerHTML = 'No bookings for this date'; return; }
+      if (!items.length) { out.innerHTML = 'Aucune reservation pour cette date'; return; }
       const ul = document.createElement('ul');
       items.forEach(it=>{
         const li = document.createElement('li');
         const start = it.startHour ?? (it.start ? new Date(it.start).getHours() : 0);
         const hours = it.hours ?? Math.max(1, Math.round((new Date(it.end)-new Date(it.start))/3600000));
-        li.textContent = `${it.date || ''} ${start}:00 for ${hours}h — ${it.ownerName || it.status || ''}`;
+        li.textContent = `${it.date || ''} ${start}:00 pendant ${hours}h — ${it.ownerName || it.status || ''}`;
         if (it.status === 'Booked') {
           const btn = document.createElement('button');
-          btn.textContent = 'Cancel';
+          btn.textContent = 'Annuler';
           btn.className = 'btn btn-sm btn-outline-danger ms-2';
           btn.addEventListener('click', async () => {
-            if (!confirm(`Cancel booking on ${it.date} at ${start}:00?`)) return;
+            if (!confirm(`Annuler la reservation du ${it.date} a ${start}:00 ?`)) return;
             const r = await fetch(`/api/reservations/${it.id}`, { method: 'DELETE', credentials: 'include' });
             if (r.ok || r.status === 204) { await fetchBookedSlots(); await renderWeek(); }
-            else { const j = await r.json().catch(()=>null); alert(j?.error || 'Failed to cancel booking'); }
+            else { const j = await r.json().catch(()=>null); alert(j?.error || 'Annulation impossible'); }
           });
           li.appendChild(btn);
         }
@@ -159,6 +238,7 @@ document.addEventListener('DOMContentLoaded', () => {
     dateInput.addEventListener('change', ()=> { weekStart = startOfWeek(new Date(dateInput.value)); renderWeek(); fetchBookedSlots(); });
 
     await loadSpaces();
+    updatePricePreview();
     // do not auto-render bookings on page load when the booking panel is hidden;
     // render only when the panel is visible (e.g. after user clicks a room)
     if (container.style.display !== 'none') {
@@ -176,14 +256,14 @@ document.addEventListener('DOMContentLoaded', () => {
     async function renderWeek(){
       const grid = document.getElementById('weekView');
       const lbl = document.getElementById('weekLabel');
-      grid.innerHTML = 'Loading...';
+      grid.innerHTML = 'Chargement...';
       const sp = parseInt(spaceSel.value,10);
-      if (!sp) { grid.innerHTML = 'No space selected'; lbl.textContent = ''; return; }
+      if (!sp) { grid.innerHTML = 'Aucun espace selectionne'; lbl.textContent = ''; return; }
       const room = rooms.find(r=>r.id == sp) || { capacity: 1 };
       // build days
       const days = [];
       for (let i=0;i<7;i++){ days.push(addDays(weekStart,i)); }
-      lbl.textContent = `${days[0].toISOString().slice(0,10)} → ${days[6].toISOString().slice(0,10)}`;
+      lbl.textContent = `${days[0].toISOString().slice(0,10)} a ${days[6].toISOString().slice(0,10)}`;
 
       // fetch bookings for each day in parallel
       const promises = days.map(d => fetch(`/api/reservations/space?spaceId=${sp}&date=${d.toISOString().slice(0,10)}`, { credentials: 'include' }).then(r=> r.ok? r.json(): []));
@@ -195,7 +275,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const table = document.createElement('table'); table.className = 'table table-sm table-responsive';
       const thead = document.createElement('thead');
       const headRow = document.createElement('tr');
-      headRow.innerHTML = '<th style="width:60px">Hour</th>' + days.map(d=>`<th>${d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}</th>`).join('');
+      headRow.innerHTML = '<th style="width:60px">Heure</th>' + days.map(d=>`<th>${d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})}</th>`).join('');
       thead.appendChild(headRow); table.appendChild(thead);
 
       const tbody = document.createElement('tbody');
@@ -216,7 +296,7 @@ document.addEventListener('DOMContentLoaded', () => {
           // semantic classes for styling
           if (count >= room.capacity) {
             cell.className = 'occupied full';
-            cell.innerHTML = '<span class="cell-icon">✖</span>';
+            cell.innerHTML = '<span class="cell-icon">X</span>';
           }
           else if (count > 0) {
             cell.className = 'occupied partial';
@@ -224,7 +304,7 @@ document.addEventListener('DOMContentLoaded', () => {
           }
           else {
             cell.className = 'free';
-            cell.innerHTML = '<span class="cell-icon">✔</span>';
+            cell.innerHTML = '<span class="cell-icon">OK</span>';
           }
 
           // tooltip and click-to-select
@@ -232,13 +312,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const bk = bookingsAtHour[0];
             const owner = bk.ownerName || ('User#'+(bk.ownerId||'?'));
             const st = bk.status || 'Booked';
-            cell.title = `${owner} — ${st}`;
+              cell.title = `${owner} - ${st}`;
             cell.style.cursor = 'pointer';
             cell.addEventListener('click', ()=>{
               dateInput.value = days[di].toISOString().slice(0,10);
               startInput.value = String(h);
               hoursInput.value = '1';
-              document.getElementById('bookingMsg').textContent = `Selected ${dateInput.value} ${h}:00`;
+              document.getElementById('bookingMsg').textContent = `Creneau selectionne : ${dateInput.value} ${h}:00`;
             });
           } else {
             // free cell click selects it too
@@ -247,7 +327,7 @@ document.addEventListener('DOMContentLoaded', () => {
               dateInput.value = days[di].toISOString().slice(0,10);
               startInput.value = String(h);
               hoursInput.value = '1';
-              document.getElementById('bookingMsg').textContent = `Selected ${dateInput.value} ${h}:00`;
+              document.getElementById('bookingMsg').textContent = `Creneau selectionne : ${dateInput.value} ${h}:00`;
             });
           }
 
@@ -270,7 +350,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const form = document.querySelector('#bookingContainer') || container;
         (form || container).appendChild(legend);
       }
-      legend.innerHTML = `<div class="d-flex gap-2 align-items-center"><span class="legend-item"><span class="badge bg-success me-1">✔</span> Available</span><span class="legend-item"><span class="badge bg-warning text-dark me-1">#</span> Partial</span><span class="legend-item"><span class="badge bg-danger me-1">✖</span> Full (capacity ${capacity})</span></div>`;
+      legend.innerHTML = `<div class="d-flex gap-2 align-items-center"><span class="legend-item"><span class="badge bg-success me-1">OK</span> Libre</span><span class="legend-item"><span class="badge bg-warning text-dark me-1">#</span> Partiel</span><span class="legend-item"><span class="badge bg-danger me-1">X</span> Complet (capacite ${capacity})</span></div>`;
     }
 
     function initFullCalendar(target){
@@ -296,7 +376,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // add a custom button to open the Booking page for the current space/date
         customButtons: {
           openBooking: {
-            text: 'Open in Booking',
+            text: 'Ouvrir reservation',
             click: function(){
               try {
                 const sp = parseInt(spaceSel.value,10) || '';
@@ -354,7 +434,7 @@ document.addEventListener('DOMContentLoaded', () => {
           dateInput.value = date;
           startInput.value = String(hour);
           hoursInput.value = String(hours);
-          document.getElementById('bookingMsg').textContent = `Selected ${date} ${hour}:00 for ${hours}h`;
+          document.getElementById('bookingMsg').textContent = `Creneau selectionne : ${date} ${hour}:00 (${hours}h)`;
           calendar.unselect();
         },
         eventClick: function(info){
@@ -373,15 +453,15 @@ document.addEventListener('DOMContentLoaded', () => {
           dateInput.value = date;
           startInput.value = String(hour);
           hoursInput.value = String(hours);
-          document.getElementById('bookingMsg').textContent = `Event selected: ${info.event.title}`;
+          document.getElementById('bookingMsg').textContent = `Reservation selectionnee : ${info.event.title}`;
         },
         eventDidMount: function(info){
           // attach bootstrap popover with richer details
           const props = info.event.extendedProps || {};
-          const owner = props.ownerName || 'Unknown';
+          const owner = props.ownerName || 'Inconnu';
           const status = props.status || 'Booked';
           const total = props.total ?? props.Total_Amount ?? '';
-          const t = `<div style="min-width:200px"><strong>${info.event.title}</strong><div class=\"text-muted small\">${status}</div><div style=\"margin-top:6px\">${new Date(info.event.start).toLocaleString()} - ${new Date(info.event.end).toLocaleString()}</div><div class=\"mt-2 small\"><strong>Owner:</strong> ${owner}</div><div class=\"small\"><strong>Amount:</strong> ${total}</div></div>`;
+          const t = `<div style="min-width:200px"><strong>${info.event.title}</strong><div class=\"text-muted small\">${status}</div><div style=\"margin-top:6px\">${new Date(info.event.start).toLocaleString()} - ${new Date(info.event.end).toLocaleString()}</div><div class=\"mt-2 small\"><strong>Client:</strong> ${owner}</div><div class=\"small\"><strong>Montant:</strong> ${total}</div></div>`;
           // use popper-based bootstrap popover
           new bootstrap.Popover(info.el, { content: t, html: true, trigger: 'hover', placement: 'auto' });
         }
@@ -391,6 +471,88 @@ document.addEventListener('DOMContentLoaded', () => {
       // re-load when space changes
       spaceSel.addEventListener('change', ()=> calendar.refetchEvents());
     }
+
+    // ---------- Cart ----------
+    const CART_KEY = 'cw_cart_v1';
+    const cartCard = document.getElementById('cartCard');
+    const cartList = document.getElementById('cartList');
+    const cartBadge = document.getElementById('cartBadge');
+    const cartTotal = document.getElementById('cartTotal');
+
+    function readCart(){ try { return JSON.parse(localStorage.getItem(CART_KEY) || '[]'); } catch { return []; } }
+    function writeCart(items){ localStorage.setItem(CART_KEY, JSON.stringify(items)); renderCart(); }
+    function renderCart(){
+      const items = readCart();
+      if (!cartCard) return;
+      cartCard.style.display = items.length ? '' : 'none';
+      cartBadge.textContent = items.length;
+      let total = 0;
+      cartList.innerHTML = '';
+      for (let i = 0; i < items.length; i++){
+        const it = items[i];
+        const li = document.createElement('li');
+        li.className = 'list-group-item d-flex justify-content-between align-items-center px-0';
+        li.innerHTML = `
+          <div>
+            <div class="fw-semibold">${it.spaceName}</div>
+              <div class="text-muted small">${it.date} - ${String(it.startHour).padStart(2,'0')}:00 (${it.hours}h)</div>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+                <span class="text-muted small">${(it.totalTtc).toFixed(2)} EUR</span>
+            <button class="btn btn-sm btn-link text-danger p-0" data-idx="${i}"><i class="bi bi-x-circle"></i></button>
+          </div>`;
+        li.querySelector('button').addEventListener('click', () => {
+          const arr = readCart(); arr.splice(i, 1); writeCart(arr);
+        });
+        cartList.appendChild(li);
+        total += it.totalTtc;
+      }
+      cartTotal.textContent = total.toFixed(2) + ' EUR';
+    }
+
+    document.getElementById('cartBtn')?.addEventListener('click', () => {
+      const sp = rooms.find(r => String(r.id) === String(spaceSel.value));
+      const validationError = validateSelection();
+      if (validationError) { msg.style.color = 'red'; msg.textContent = validationError; return; }
+      if (!sp) { alert('Choisissez un espace.'); return; }
+      const hours = Math.max(1, parseInt(hoursInput.value, 10) || 1);
+      const item = {
+        spaceId: parseInt(spaceSel.value, 10),
+        spaceName: sp.name,
+        date: dateInput.value,
+        startHour: parseInt(startInput.value, 10) || 0,
+        hours,
+        totalTtc: +(sp.pricePerHour * hours * 1.20).toFixed(2)
+      };
+      const arr = readCart(); arr.push(item); writeCart(arr);
+      msg.style.color = 'green'; msg.textContent = `Ajoute au panier (${arr.length})`;
+    });
+
+    document.getElementById('cartClear')?.addEventListener('click', () => writeCart([]));
+
+    document.getElementById('checkoutBtn')?.addEventListener('click', async () => {
+      const items = readCart();
+      if (!items.length) return;
+      const res = await fetch('/api/cart/checkout', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ items: items.map(i => ({ spaceId: i.spaceId, date: i.date, startHour: i.startHour, hours: i.hours })) })
+      });
+      if (res.ok){
+        const data = await res.json();
+        writeCart([]);
+        msg.style.color = 'green';
+        msg.innerHTML = `Panier valide - Facture ${data.invoiceNumber} (${data.totalTtc.toFixed(2)} EUR) <a href="/MyReservations" class="ms-2">Mes reservations</a>`;
+        await fetchBookedSlots(); renderWeek();
+      } else if (res.status === 409) {
+        const j = await res.json().catch(()=>null);
+        msg.style.color = 'red'; msg.textContent = j?.error || 'Conflit de reservation';
+      } else {
+        const j = await res.json().catch(()=>null);
+        msg.style.color = 'red'; msg.textContent = j?.error || 'Validation impossible';
+      }
+    });
+
+    renderCart();
 
     // expose API for other scripts to show booking UI for a space
     window.initFullCalendar = initFullCalendar;
