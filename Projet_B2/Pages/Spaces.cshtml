@@ -1,16 +1,19 @@
 @page
-@{ Layout = "_Layout"; ViewData["Title"] = "Spaces"; }
+@{ Layout = "_Layout"; ViewData["Title"] = "Espaces"; }
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h4 mb-0"><i class="bi bi-grid me-2 text-primary"></i>Co-working Spaces</h1>
-  <a class="btn btn-outline-secondary btn-sm" href="/SpacesMap"><i class="bi bi-map me-1"></i>Visual map</a>
+<div class="page-heading">
+  <div>
+    <h1 class="h4 mb-0"><i class="bi bi-grid me-2 text-primary"></i>Espaces de coworking</h1>
+    <div class="text-muted small">Catalogue des postes, bureaux, salles et tarifs.</div>
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="/SpacesMap"><i class="bi bi-map me-1"></i>Plan visuel</a>
 </div>
 
 <div class="card mb-4">
   <div class="card-body">
     <form id="addForm" class="row g-2 align-items-end">
       <div class="col-sm">
-        <label class="form-label small text-muted">Name</label>
+        <label class="form-label small text-muted">Nom</label>
         <input name="name" placeholder="e.g. Meeting Room F" required class="form-control" />
       </div>
       <div class="col-auto">
@@ -23,15 +26,15 @@
         </select>
       </div>
       <div class="col-auto">
-        <label class="form-label small text-muted">Capacity</label>
+        <label class="form-label small text-muted">Capacite</label>
         <input name="capacity" type="number" min="1" placeholder="6" required class="form-control" style="width:100px" />
       </div>
       <div class="col-auto">
-        <label class="form-label small text-muted">Price / h (€)</label>
+        <label class="form-label small text-muted">Prix / h (EUR)</label>
         <input name="pricePerHour" type="number" min="0" step="0.5" placeholder="5" required class="form-control" style="width:120px" />
       </div>
       <div class="col-auto">
-        <button type="submit" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>Add</button>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>Ajouter</button>
       </div>
     </form>
   </div>
@@ -40,19 +43,19 @@
 <div id="list" class="row g-3"></div>
 <div id="emptyState" class="text-center text-muted py-5" style="display:none">
   <i class="bi bi-inbox fs-1"></i>
-  <p class="mt-2">No spaces yet. Add one above.</p>
+  <p class="mt-2">Aucun espace pour le moment. Ajoutez-en un avec le formulaire.</p>
 </div>
 
 <div class="modal fade" id="resModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-tools me-2"></i>Equipment <span id="resTitle" class="text-muted ms-1"></span></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-tools me-2"></i>Equipements <span id="resTitle" class="text-muted ms-1"></span></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
         <ul id="resList" class="list-group mb-3"></ul>
         <form id="resAddForm" class="row g-2 align-items-end">
-          <div class="col"><label class="form-label small text-muted">Name</label><input name="name" required class="form-control" placeholder="Projector" /></div>
+          <div class="col"><label class="form-label small text-muted">Nom</label><input name="name" required class="form-control" placeholder="Projecteur" /></div>
           <div class="col-auto"><label class="form-label small text-muted">Type</label><input name="type" class="form-control" placeholder="AV" style="width:120px" /></div>
-          <div class="col-auto"><label class="form-label small text-muted">Qty</label><input name="quantity" type="number" min="1" value="1" class="form-control" style="width:80px" /></div>
+          <div class="col-auto"><label class="form-label small text-muted">Qté</label><input name="quantity" type="number" min="1" value="1" class="form-control" style="width:80px" /></div>
           <div class="col-auto"><button class="btn btn-primary"><i class="bi bi-plus-lg"></i></button></div>
           <input type="hidden" name="spaceId" />
         </form>

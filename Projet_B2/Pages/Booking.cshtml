@@ -1,9 +1,14 @@
 @page
-@{ Layout = "_Layout"; ViewData["Title"] = "Booking"; }
+@{ Layout = "_Layout"; ViewData["Title"] = "Reservation"; }
 <div id="bookingContainer">
-  <div class="d-flex align-items-center gap-3 mb-3">
+<div class="page-heading">
+<div class="d-flex align-items-center gap-3">
   <img src="~/images/Logo_1_mini.svg" asp-append-version="true" alt="Logo" style="height:36px" />
-  <h1 class="h4 mb-3">Book a Room</h1>
+  <div>
+    <h1 class="h4 mb-0">Reserver un espace</h1>
+    <div class="text-muted small">Choisissez un espace, un creneau, puis confirmez ou ajoutez au panier.</div>
+  </div>
+</div>
 </div>
   <div class="row">
     <div class="col-md-5">
@@ -11,10 +16,10 @@
         <div class="card-body">
           <form onsubmit="return false;" id="bookingForm">
             <div class="mb-2">
-              <label class="form-label">Type</label>
+              <label class="form-label">Type d'espace</label>
               <div class="btn-group btn-group-sm w-100" role="group" id="typeFilter">
                 <input type="radio" class="btn-check" name="type" id="t-all" value="" checked />
-                <label class="btn btn-outline-primary" for="t-all">All</label>
+                <label class="btn btn-outline-primary" for="t-all">Tous</label>
                 <input type="radio" class="btn-check" name="type" id="t-nomad" value="Nomad" />
                 <label class="btn btn-outline-primary" for="t-nomad">Nomad</label>
                 <input type="radio" class="btn-check" name="type" id="t-office" value="Office" />
@@ -26,16 +31,16 @@
               </div>
             </div>
             <div class="mb-3">
-              <label class="form-label">Space</label>
+              <label class="form-label">Espace</label>
               <select id="spaceSelect" class="form-select"></select>
               <div class="small text-muted mt-1" id="spaceEquipments"></div>
             </div>
             <div class="mb-2">
-              <label class="form-label">Quick slot</label>
+              <label class="form-label">Creneaux rapides</label>
               <div class="btn-group btn-group-sm w-100" role="group">
-                <button type="button" class="btn btn-outline-secondary" data-slot="morning">Morning · 9-13</button>
-                <button type="button" class="btn btn-outline-secondary" data-slot="afternoon">Afternoon · 14-18</button>
-                <button type="button" class="btn btn-outline-secondary" data-slot="day">Full day · 9-18</button>
+                <button type="button" class="btn btn-outline-secondary" data-slot="morning">Matin - 9h/13h</button>
+                <button type="button" class="btn btn-outline-secondary" data-slot="afternoon">Apres-midi - 14h/18h</button>
+                <button type="button" class="btn btn-outline-secondary" data-slot="day">Journee - 9h/18h</button>
               </div>
             </div>
             <div class="mb-3">
@@ -44,26 +49,26 @@
             </div>
             <div class="row g-2 mb-3">
               <div class="col-6">
-                <label class="form-label">Start hour</label>
-                <input id="startInput" type="number" min="0" max="23" class="form-control" />
+                <label class="form-label">Heure de debut</label>
+                <input id="startInput" type="number" min="7" max="21" class="form-control" />
               </div>
               <div class="col-6">
-                <label class="form-label">Hours</label>
+                <label class="form-label">Duree</label>
                 <input id="hoursInput" type="number" min="1" max="12" class="form-control" />
               </div>
             </div>
             <div class="mb-3">
-              <label class="form-label">Invite attendees <span class="text-muted small">(optional)</span></label>
+              <label class="form-label">Invites <span class="text-muted small">(optionnel)</span></label>
               <input id="attendeesInput" class="form-control" placeholder="alice@example.com, bob@example.com" />
-              <div class="form-text">Comma-separated emails. They receive an invitation.</div>
+              <div class="form-text">Adresses e-mail separees par une virgule.</div>
             </div>
             <div class="alert alert-light border d-flex justify-content-between align-items-center py-2 mb-3" id="priceBox">
-              <div class="small text-muted">Estimated price</div>
-              <div><span id="priceTotal" class="fw-bold fs-5">0.00 €</span> <span class="text-muted small" id="priceDetail"></span></div>
+              <div class="small text-muted">Prix estime</div>
+            <div><span id="priceTotal" class="fw-bold fs-5">0.00 EUR</span> <span class="text-muted small" id="priceDetail"></span></div>
             </div>
             <div class="d-flex gap-2 align-items-center flex-wrap">
-              <button id="bookBtn" class="btn btn-primary"><i class="bi bi-check2 me-1"></i>Confirm booking</button>
-              <button id="cartBtn" type="button" class="btn btn-outline-primary"><i class="bi bi-cart-plus me-1"></i>Add to cart</button>
+              <button id="bookBtn" class="btn btn-primary"><i class="bi bi-check2 me-1"></i>Confirmer</button>
+              <button id="cartBtn" type="button" class="btn btn-outline-primary"><i class="bi bi-cart-plus me-1"></i>Ajouter au panier</button>
               <div id="bookingMsg" class="text-muted small"></div>
             </div>
           </form>
@@ -73,13 +78,13 @@
       <div class="card mb-3" id="cartCard" style="display:none">
         <div class="card-body">
           <div class="d-flex justify-content-between align-items-center mb-2">
-            <h6 class="mb-0"><i class="bi bi-cart3 me-1"></i>Cart <span class="badge bg-primary ms-1" id="cartBadge">0</span></h6>
-            <button class="btn btn-sm btn-link text-danger" id="cartClear">Clear</button>
+            <h6 class="mb-0"><i class="bi bi-cart3 me-1"></i>Panier <span class="badge bg-primary ms-1" id="cartBadge">0</span></h6>
+            <button class="btn btn-sm btn-link text-danger" id="cartClear">Vider</button>
           </div>
           <ul id="cartList" class="list-group list-group-flush mb-2"></ul>
           <div class="d-flex justify-content-between align-items-center">
-            <div class="small text-muted">Total TTC <strong id="cartTotal" class="ms-1">0.00 €</strong></div>
-            <button id="checkoutBtn" class="btn btn-success btn-sm"><i class="bi bi-bag-check me-1"></i>Checkout</button>
+            <div class="small text-muted">Total TTC <strong id="cartTotal" class="ms-1">0.00 EUR</strong></div>
+            <button id="checkoutBtn" class="btn btn-success btn-sm"><i class="bi bi-bag-check me-1"></i>Valider</button>
           </div>
         </div>
       </div>
@@ -92,7 +97,7 @@
               <button id="todayBtn" class="btn btn-sm btn-outline-primary">Today</button>
               <button id="nextWeek" class="btn btn-sm btn-outline-secondary">&rarr;</button>
             </div>
-            <div class="fw-semibold" id="weekLabel">Week</div>
+            <div class="fw-semibold" id="weekLabel">Semaine</div>
             <div></div>
           </div>
           <div id="weekView" class="availability-grid"></div>
@@ -102,13 +107,13 @@
 
     <div class="col-md-7">
       <div id="bookedListArea" class="card card-body">
-        <h6 class="mb-2">Bookings</h6>
-        <div id="bookedList">Select a date or room to view bookings</div>
+        <h6 class="mb-2">Reservations du creneau</h6>
+        <div id="bookedList">Selectionnez une date ou un espace pour voir les reservations</div>
       </div>
       <div class="card mt-3 d-none d-md-block">
         <div class="card-body">
-          <h6 class="mb-2">Legend</h6>
-          <div class="d-flex gap-2 align-items-center"><span class="badge bg-success">✓ Free</span><span class="badge bg-warning text-dark">1..n Booked</span><span class="badge bg-danger">× Full</span></div>
+          <h6 class="mb-2">Legende</h6>
+          <div class="d-flex gap-2 align-items-center"><span class="badge bg-success">Libre</span><span class="badge bg-warning text-dark">Partiel</span><span class="badge bg-danger">Complet</span></div>
         </div>
       </div>
     </div>
