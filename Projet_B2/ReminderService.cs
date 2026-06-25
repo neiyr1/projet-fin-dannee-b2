@@ -1,3 +1,4 @@
+// FONCTIONNALITE: tache de fond pour retrouver les reservations proches et declencher les rappels.
 public class ReminderService : BackgroundService
 {
     readonly string _dbPath;

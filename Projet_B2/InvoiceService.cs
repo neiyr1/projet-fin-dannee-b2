@@ -4,6 +4,7 @@ using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
 
+// FONCTIONNALITE: donnees d'une ligne de facture pour une reservation.
 public class InvoiceLine
 {
     public int ReservationId { get; set; }
@@ -36,6 +37,7 @@ public class InvoiceData
     public List<InvoiceLine> Lines { get; set; } = new();
 }
 
+// FONCTIONNALITE: creation et stockage des factures PDF associees aux reservations.
 public class InvoiceService
 {
     readonly string _dbPath;

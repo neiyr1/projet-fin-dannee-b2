@@ -9,6 +9,7 @@ using System.Text.RegularExpressions;
 
 #pragma warning disable CA1416
 
+// FONCTIONNALITE: liaison Active Directory existante, creation, connexion et activation/desactivation des comptes.
 public sealed class ActiveDirectoryService
 {
     private const int UserAccountControlDisabledFlag = 0x2;

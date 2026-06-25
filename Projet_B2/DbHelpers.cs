@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 
+// FONCTIONNALITE: acces centralise a la base SQLite locale du projet.
 public static class DbHelpers
 {
     public static string GetDbPath(string websitePath)

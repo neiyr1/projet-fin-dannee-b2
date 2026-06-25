@@ -1,3 +1,4 @@
+// FONCTIONNALITE: fonctions communes du site, navigation, login, espaces et equipements.
 async function postJson(url, data) {
   const res = await fetch(url, {
     method: 'POST',
@@ -8,6 +9,7 @@ async function postJson(url, data) {
   return res;
 }
 
+// FONCTIONNALITE: affichage du menu admin selon le role connecte.
 function applyAdminMenu(adminMenu, role) {
   if (!adminMenu) return;
   const items = adminMenu.querySelectorAll('[data-roles]');
@@ -25,6 +27,7 @@ function applyAdminMenu(adminMenu, role) {
   }
 }
 
+// FONCTIONNALITE: mise a jour de la barre de navigation apres lecture de /api/me.
 async function refreshUser() {
   try {
     const res = await fetch('/api/me', { credentials: 'include' });
@@ -59,6 +62,7 @@ async function refreshUser() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  // FONCTIONNALITE: formulaire de connexion.
   const loginForm = document.getElementById('loginForm');
   if (loginForm) {
     loginForm.addEventListener('submit', async (e) => {
@@ -70,6 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // FONCTIONNALITE: formulaire d'ajout d'un espace depuis la page Espaces.
   const addForm = document.getElementById('addForm');
   if (addForm) {
     addForm.addEventListener('submit', async (e) => {
@@ -89,6 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // FONCTIONNALITE: modal d'ajout des equipements d'un espace.
   const resAddForm = document.getElementById('resAddForm');
   if (resAddForm) {
     const equipmentSelect = document.getElementById('equipmentSelect');
@@ -154,6 +160,7 @@ function formatEuro(value){
   return `${(Number(value) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} \u20ac`;
 }
 
+// FONCTIONNALITE: affichage de la liste des espaces sous forme de cartes.
 async function loadList() {
   const res = await fetch('/api/spaces', { credentials: 'include' });
   if (res.status === 401) { location.href = '/Login'; return; }
@@ -195,6 +202,7 @@ async function loadList() {
   }
 }
 
+// FONCTIONNALITE: affichage/suppression des equipements lies a un espace.
 async function renderResources(spaceId){
   const list = document.getElementById('resList');
   list.innerHTML = '<li class="list-group-item text-muted">Chargement...</li>';

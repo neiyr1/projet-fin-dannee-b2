@@ -1,3 +1,4 @@
+// FONCTIONNALITE: parcours de reservation, calendrier, disponibilites et panier.
 document.addEventListener('DOMContentLoaded', () => {
   (async function(){
     const container = document.getElementById('bookingContainer');
@@ -36,6 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
       else msg.textContent = text;
     }
 
+    // FONCTIONNALITE: filtre des espaces par type avant reservation.
     function applyTypeFilter(){
       const filtered = typeFilter ? rooms.filter(r => r.type === typeFilter) : rooms;
       spaceSel.innerHTML = '';
@@ -51,6 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
       loadEquipments();
     }
 
+    // FONCTIONNALITE: affichage des equipements disponibles pour l'espace selectionne.
     async function loadEquipments(){
       const eq = document.getElementById('spaceEquipments');
       if (!eq || !spaceSel.value) { if (eq) eq.textContent = ''; return; }
@@ -76,6 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
       updatePricePreview();
     }));
 
+    // FONCTIONNALITE: chargement des espaces et preselection depuis le plan.
     async function loadSpaces(){
       const res = await fetch('/api/spaces', { credentials: 'include' });
       if (!res.ok) return;
@@ -135,6 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     })();
 
+    // FONCTIONNALITE: calcul du prix estime avant confirmation.
     function updatePricePreview(){
       const priceTotal = document.getElementById('priceTotal');
       const priceDetail = document.getElementById('priceDetail');
@@ -162,6 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
       metaEl.textContent = `${sp.type || 'Espace'} · capacité ${sp.capacity || 1} · ${euro(sp.pricePerHour || 0)}/h HT`;
     }
 
+    // FONCTIONNALITE: validation locale du creneau choisi par l'utilisateur.
     function validateSelection(){
       const start = parseInt(startInput.value, 10);
       const hours = parseInt(hoursInput.value, 10);
@@ -176,6 +182,7 @@ document.addEventListener('DOMContentLoaded', () => {
     spaceSel.addEventListener('change', () => { updatePricePreview(); updateSpaceSummary(); });
     hoursInput.addEventListener('input', updatePricePreview);
 
+    // FONCTIONNALITE: creation directe d'une reservation.
     bookBtn.addEventListener('click', async (e)=>{
       e.preventDefault();
       const spaceId = parseInt(spaceSel.value, 10);
@@ -218,6 +225,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
+    // FONCTIONNALITE: recuperation des creneaux deja reserves pour bloquer les conflits visuels.
     async function fetchBookedSlots(){
       const out = document.getElementById('bookedList') || createBookedList();
       out.innerHTML = 'Chargement...';
@@ -289,6 +297,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function addDays(d,n){ const r = new Date(d); r.setDate(r.getDate()+n); return r; }
 
     // render week availability grid
+    // FONCTIONNALITE: affichage hebdomadaire simplifie des disponibilites.
     async function renderWeek(){
       const grid = document.getElementById('weekView');
       const lbl = document.getElementById('weekLabel');
@@ -392,6 +401,7 @@ document.addEventListener('DOMContentLoaded', () => {
       legend.innerHTML = `<div class="calendar-legend"><span><i class="legend-dot free"></i>Libre</span><span><i class="legend-dot partial"></i>Partiel</span><span><i class="legend-dot full"></i>Complet (capacité ${capacity})</span></div>`;
     }
 
+    // FONCTIONNALITE: calendrier complet FullCalendar pour visualiser et choisir les creneaux.
     function initFullCalendar(target){
       // Accept an optional target element (DOM node or id). If not provided, look for
       // an element with id 'fullCalendar'. Do not auto-run on page load; this function
@@ -512,6 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ---------- Cart ----------
+    // FONCTIONNALITE: panier local avant validation groupee des reservations.
     const CART_KEY = 'cw_cart_v1';
     const cartCard = document.getElementById('cartCard');
     const cartList = document.getElementById('cartList');
@@ -572,6 +583,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (cartClear) cartClear.addEventListener('click', () => writeCart([]));
 
     const checkoutBtn = document.getElementById('checkoutBtn');
+    // FONCTIONNALITE: validation du panier et envoi a /api/cart/checkout.
     if (checkoutBtn) checkoutBtn.addEventListener('click', async () => {
       const items = readCart();
       if (!items.length) return;
@@ -598,6 +610,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // expose API for other scripts to show booking UI for a space
     window.initFullCalendar = initFullCalendar;
 
+    // FONCTIONNALITE: ouverture du formulaire de reservation depuis le plan.
     window.showBookingForSpace = async function(spaceId){
       // ensure spaces/options are loaded
       await loadSpaces();

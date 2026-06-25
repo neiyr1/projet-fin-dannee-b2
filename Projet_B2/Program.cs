@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.Data.Sqlite;
 using QuestPDF.Infrastructure;
 
+// FONCTIONNALITE: configuration globale du site Razor, services metier et authentification.
 // --- App setup ---
 
 QuestPDF.Settings.License = LicenseType.Community;
@@ -37,6 +38,7 @@ builder.WebHost.ConfigureKestrel(opts =>
     opts.ListenLocalhost(5001, listen => listen.UseHttps());
 });
 
+// FONCTIONNALITE: cookie de connexion et controle automatique des comptes desactives.
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(opts =>
     {
@@ -83,6 +85,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapRazorPages();
 
+// FONCTIONNALITE: initialisation SQLite et structure des tables applicatives.
 // --- Database init ---
 
 string GetDbPath() => DbHelpers.GetDbPath(websitePath);
@@ -171,6 +174,7 @@ DbHelpers.SeedDefaultSpaces(dbPath);
 
 // --- Auth endpoints ---
 
+// FONCTIONNALITE: connexion au site avec verification Active Directory si disponible, sinon mot de passe local.
 app.MapPost("/api/login", async (HttpContext http, ActiveDirectoryService adService, ILogger<Program> logger) =>
 {
     var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(http.Request.Body);
@@ -268,6 +272,7 @@ app.MapGet("/api/me", (ClaimsPrincipal user) =>
     return Results.Ok(new { user = user.Identity?.Name, role });
 });
 
+// FONCTIONNALITE: inscription utilisateur et creation du lien AD quand l'AD est active.
 app.MapPost("/api/signup", async (HttpContext http, EmailService emailSvc, ActiveDirectoryService adService, ILogger<Program> logger) =>
 {
     var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(http.Request.Body);
@@ -357,6 +362,7 @@ app.MapGet("/api/verify-email", (string? token) =>
 
 // --- Admin: Users management ---
 
+// FONCTIONNALITE: administration des utilisateurs, roles, verification email et etat du compte.
 app.MapGet("/api/users", (HttpContext http) =>
 {
     if (!http.User.IsInRole("Admin")) return Results.Forbid();
@@ -436,6 +442,7 @@ app.MapPost("/api/users/{id:int}/resend-welcome", async (HttpContext http, int i
     return Results.Ok(new { id });
 }).RequireAuthorization();
 
+// FONCTIONNALITE: creation admin d'un utilisateur avec creation du compte Active Directory associe.
 app.MapPost("/api/users", async (HttpContext http, ActiveDirectoryService adService, ILogger<Program> logger) =>
 {
     if (!http.User.IsInRole("Admin")) return Results.Forbid();
@@ -576,6 +583,7 @@ app.MapPost("/api/users/{id:int}/reset-password", async (HttpContext http, int i
     return rows == 0 ? Results.NotFound() : Results.Ok(new { id, activeDirectory = false });
 }).RequireAuthorization();
 
+// FONCTIONNALITE: activation/desactivation d'un utilisateur cote site et cote Active Directory.
 app.MapPost("/api/users/{id:int}/status", async (HttpContext http, int id, ActiveDirectoryService adService, ILogger<Program> logger) =>
 {
     if (!http.User.IsInRole("Admin")) return Results.Forbid();
@@ -686,6 +694,7 @@ app.MapDelete("/api/users/{id:int}", (HttpContext http, int id) =>
 
 // --- Admin: Reservations overview ---
 
+// FONCTIONNALITE: consultation admin de toutes les reservations avec filtres.
 app.MapGet("/api/reservations/all", (HttpContext http, string? status, string? from, string? to) =>
 {
     if (!(http.User.IsInRole("Admin") || http.User.IsInRole("Comptabilite"))) return Results.Forbid();
@@ -731,6 +740,7 @@ app.MapGet("/api/reservations/all", (HttpContext http, string? status, string? f
 
 // --- Spaces endpoints ---
 
+// FONCTIONNALITE: catalogue des espaces et CRUD des espaces.
 app.MapGet("/api/spaces", () =>
 {
     var list = new List<object>();
@@ -790,6 +800,7 @@ app.MapDelete("/api/spaces/{id:int}", (HttpContext http, int id) =>
 
 // --- Resources (equipment per space) ---
 
+// FONCTIONNALITE: equipements rattaches aux espaces.
 app.MapGet("/api/spaces/{id:int}/resources", (HttpContext http, int id) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
@@ -848,6 +859,7 @@ app.MapDelete("/api/resources/{id:int}", (HttpContext http, int id) =>
 
 // --- Reservation endpoints ---
 
+// FONCTIONNALITE: creation d'une reservation, controle des conflits, facture et jeton d'acces.
 app.MapPost("/api/reservations", async (HttpContext http, InvoiceService invoiceSvc, EmailService emailSvc, ActiveDirectoryService adService) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
@@ -991,6 +1003,7 @@ app.MapPost("/api/reservations", async (HttpContext http, InvoiceService invoice
     });
 }).RequireAuthorization();
 
+// FONCTIONNALITE: reservations visibles par l'utilisateur connecte.
 app.MapGet("/api/reservations/mine", (HttpContext http) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
@@ -1038,6 +1051,7 @@ app.MapGet("/api/reservations/mine", (HttpContext http) =>
     return Results.Ok(list);
 }).RequireAuthorization();
 
+// FONCTIONNALITE: annulation d'une reservation par l'utilisateur ou l'admin.
 app.MapDelete("/api/reservations/{id:int}", (HttpContext http, int id, EmailService emailSvc) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
@@ -1105,6 +1119,7 @@ app.MapDelete("/api/reservations/{id:int}", (HttpContext http, int id, EmailServ
     return Results.Ok(new { id, status = "Cancelled" });
 }).RequireAuthorization();
 
+// FONCTIONNALITE: modification d'une reservation existante avec nouveau controle de conflit.
 app.MapPut("/api/reservations/{id:int}", async (HttpContext http, int id, EmailService emailSvc) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
@@ -1197,6 +1212,7 @@ app.MapPut("/api/reservations/{id:int}", async (HttpContext http, int id, EmailS
 
 // --- Cart checkout (multi-item booking) ---
 
+// FONCTIONNALITE: validation du panier et creation des reservations associees.
 app.MapPost("/api/cart/checkout", async (HttpContext http, InvoiceService invoiceSvc, EmailService emailSvc, ActiveDirectoryService adService) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
@@ -1322,6 +1338,7 @@ app.MapPost("/api/cart/checkout", async (HttpContext http, InvoiceService invoic
 
 // --- QR code + Access control ---
 
+// FONCTIONNALITE: generation du QR code d'acces pour une reservation.
 app.MapGet("/api/reservations/{id:int}/qr", (HttpContext http, int id) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
@@ -1349,6 +1366,7 @@ app.MapGet("/api/reservations/{id:int}/qr", (HttpContext http, int id) =>
     return Results.File(png, "image/png");
 }).RequireAuthorization();
 
+// FONCTIONNALITE: verification d'un jeton/QR code par l'admin ou l'accueil.
 app.MapPost("/api/access/verify", async (HttpContext http) =>
 {
     if (!(http.User.IsInRole("Admin") || http.User.IsInRole("Accueil"))) return Results.Forbid();
@@ -1446,6 +1464,7 @@ app.MapGet("/api/admin/backup", (HttpContext http) =>
 
 // --- Enhanced dashboard stats ---
 
+// FONCTIONNALITE: statistiques du dashboard admin.
 app.MapGet("/api/admin/dashboard", (HttpContext http) =>
 {
     if (!(http.User.IsInRole("Admin") || http.User.IsInRole("Comptabilite"))) return Results.Forbid();
@@ -1501,6 +1520,7 @@ app.MapGet("/api/admin/dashboard", (HttpContext http) =>
     });
 }).RequireAuthorization();
 
+// FONCTIONNALITE: acces securise aux factures PDF liees aux reservations.
 app.MapGet("/api/invoices/{reservationId:int}", (HttpContext http, int reservationId) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
@@ -1533,6 +1553,7 @@ app.MapGet("/api/invoices/{reservationId:int}", (HttpContext http, int reservati
     return Results.File(pdfPath, "application/pdf", $"{num}.pdf");
 }).RequireAuthorization();
 
+// FONCTIONNALITE: disponibilites d'un espace pour alimenter calendrier et plan.
 app.MapGet("/api/reservations/space", (HttpContext http, int spaceId, string? date) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();

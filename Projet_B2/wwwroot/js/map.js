@@ -1,3 +1,4 @@
+// FONCTIONNALITE: plan visuel des espaces et selection rapide vers la reservation.
 async function fetchSpaces(){
   try{
     const res = await fetch('/api/spaces', { credentials: 'include' });
@@ -9,6 +10,7 @@ async function fetchSpaces(){
   }
 }
 
+// FONCTIONNALITE: dessin SVG du plan des espaces.
 function renderMap(spaces){
   const container = document.getElementById('mapContainer');
   container.innerHTML = '';
@@ -118,6 +120,7 @@ function clearSelection(){
   document.querySelectorAll('.space-list li.selected').forEach(el=>el.classList.remove('selected'));
 }
 
+// FONCTIONNALITE: selection d'un espace et mise a jour du panneau detail.
 function selectSpace(id){
   clearSelection();
   const rect = document.querySelector(`.space-rect[data-space-id='${id}']`);
@@ -234,6 +237,7 @@ let mapWeekStart = startOfWeek(new Date());
 function startOfWeek(d){ const dt = new Date(d); const day = dt.getDay(); const diff = (day + 6) % 7; dt.setDate(dt.getDate()-diff); dt.setHours(0,0,0,0); return dt; }
 function addDays(d,n){ const r = new Date(d); r.setDate(r.getDate()+n); return r; }
 
+// FONCTIONNALITE: apercu hebdomadaire des disponibilites depuis le plan.
 async function renderSpaceWeek(spaceId, capacity){
   const grid = document.getElementById('mapWeekView');
   const lbl = document.getElementById('mapWeekLabel');
@@ -318,6 +322,7 @@ async function loadAndRender(){
   renderMap(spaces);
 }
 
+// FONCTIONNALITE: liste laterale des espaces synchronisee avec le plan.
 function renderList(spaces){
   const ul = document.getElementById('spaceList');
   ul.innerHTML = '';

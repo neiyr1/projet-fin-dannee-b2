@@ -1,5 +1,6 @@
 using QRCoder;
 
+// FONCTIONNALITE: generation des QR codes et jetons d'acces des reservations.
 public static class QrService
 {
     public static byte[] GeneratePng(string content, int pixelsPerModule = 8)
