@@ -3,6 +3,7 @@ using System.DirectoryServices.AccountManagement;
 using System.DirectoryServices.Protocols;
 using System.Globalization;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -479,15 +480,25 @@ public sealed class ActiveDirectoryService
         var ignoreCertificateErrors = section.GetValue("IgnoreCertificateErrors", false);
         var serviceUserEnv = section["ServiceAccountUserEnvironmentVariable"] ?? "AD_SERVICE_USERNAME";
         var servicePasswordEnv = section["ServiceAccountPasswordEnvironmentVariable"] ?? "AD_SERVICE_PASSWORD";
-        var serviceUser = (Environment.GetEnvironmentVariable(serviceUserEnv) ?? string.Empty).Trim();
-        var servicePassword = Environment.GetEnvironmentVariable(servicePasswordEnv) ?? string.Empty;
+        var serviceUser = ReadEnvironmentValue(serviceUserEnv).Trim();
+        var servicePassword = ReadEnvironmentValue(servicePasswordEnv);
 
         if (string.IsNullOrWhiteSpace(domainDns))
             throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Configuration, "ActiveDirectory:DomainDnsName est requis.");
         if (requireContainer && string.IsNullOrWhiteSpace(container))
             throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Configuration, "ActiveDirectory:UsersContainerDistinguishedName est requis.");
         if (requireServiceAccount && (string.IsNullOrWhiteSpace(serviceUser) || string.IsNullOrWhiteSpace(servicePassword)))
-            throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Configuration, $"Variables d'environnement {serviceUserEnv} et {servicePasswordEnv} requises.");
+        {
+            var missing = new List<string>();
+            if (string.IsNullOrWhiteSpace(serviceUser)) missing.Add(serviceUserEnv);
+            if (string.IsNullOrWhiteSpace(servicePassword)) missing.Add(servicePasswordEnv);
+            var scopes = OperatingSystem.IsWindows()
+                ? "process, Machine Windows, User Windows"
+                : "process du service";
+            throw new ActiveDirectoryOperationException(
+                ActiveDirectoryErrorKind.Configuration,
+                $"Variables d'environnement requises introuvables pour l'API: {string.Join(", ", missing)}. Machine: {Environment.MachineName}. OS: {RuntimeInformation.OSDescription}. Scopes lus: {scopes}. Redemarrez le service qui lance dotnet apres modification.");
+        }
 
         if (string.IsNullOrWhiteSpace(baseDn))
             baseDn = DomainToDistinguishedName(domainDns);
@@ -517,6 +528,23 @@ public sealed class ActiveDirectoryService
             return false;
 
         return !OperatingSystem.IsWindows();
+    }
+
+    private static string ReadEnvironmentValue(string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        if (!string.IsNullOrWhiteSpace(value)) return value;
+
+        if (OperatingSystem.IsWindows())
+        {
+            value = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Machine);
+            if (!string.IsNullOrWhiteSpace(value)) return value;
+
+            value = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User);
+            if (!string.IsNullOrWhiteSpace(value)) return value;
+        }
+
+        return string.Empty;
     }
 
     private static void EnsureWindowsForAccountManagement()
