@@ -1,4 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
-  <rect rx="16" ry="16" width="120" height="120" fill="#2563eb" />
-  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" fill="#fff">CW</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="64" viewBox="0 0 220 64" role="img" aria-labelledby="logoTitle">
+  <title id="logoTitle">Laceris Tech</title>
+  <defs>
+    <linearGradient id="ltGradient" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#13C8A6"/>
+      <stop offset="1" stop-color="#0056D2"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="52" height="52" rx="12" fill="url(#ltGradient)"/>
+  <path d="M22 18v22h14v6H16V18h6z" fill="#fff"/>
+  <path d="M32 18h18v6h-6v22h-6V24h-6v-6z" fill="#fff" opacity=".92"/>
+  <text x="74" y="31" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="22" font-weight="800" fill="#111827">Laceris</text>
+  <text x="74" y="50" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="600" fill="#0056D2">Tech</text>
 </svg>

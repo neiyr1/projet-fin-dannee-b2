@@ -323,6 +323,7 @@ function renderList(spaces){
   ul.innerHTML = '';
   spaces.forEach(s=>{
     const li = document.createElement('li');
+    li.className = 'list-group-item space-list-item';
     li.textContent = `${s.name} (cap. ${s.capacity})`;
     li.dataset.spaceId = s.id;
     li.dataset.name = s.name;

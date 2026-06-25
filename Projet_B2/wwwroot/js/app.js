@@ -21,7 +21,7 @@ function applyAdminMenu(adminMenu, role) {
   adminMenu.style.display = visibleCount > 0 ? '' : 'none';
   const label = document.getElementById('adminMenuLabel');
   if (label) {
-    label.textContent = role === 'Comptabilite' ? 'Comptabilité' : (role === 'Accueil' ? 'Accueil' : 'Admin');
+    label.textContent = role === 'Comptabilite' ? 'Comptabilit\u00e9' : (role === 'Accueil' ? 'Accueil' : 'Admin');
   }
 }
 
@@ -53,8 +53,8 @@ async function refreshUser() {
       if (userChip) userChip.style.display = 'none';
       if (adminMenu) adminMenu.style.display = 'none';
     }
-  } catch (e) {
-    // ignore network errors
+  } catch {
+    // Ignore transient network errors on shared layout load.
   }
 }
 
@@ -91,14 +91,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const resAddForm = document.getElementById('resAddForm');
   if (resAddForm) {
+    const equipmentSelect = document.getElementById('equipmentSelect');
+    const equipmentType = document.getElementById('equipmentType');
+    if (equipmentSelect && equipmentType) {
+      equipmentSelect.addEventListener('change', () => {
+        const selected = equipmentSelect.options[equipmentSelect.selectedIndex];
+        equipmentType.value = selected ? (selected.dataset.type || '') : '';
+      });
+    }
+
     resAddForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(resAddForm);
       const spaceId = fd.get('spaceId');
-      const payload = { name: fd.get('name'), type: fd.get('type'), quantity: parseInt(fd.get('quantity')) || 1 };
-      const r = await fetch(`/api/spaces/${spaceId}/resources`, { method: 'POST', headers: {'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify(payload) });
-      if (r.ok) { resAddForm.querySelector('input[name=name]').value = ''; renderResources(spaceId); }
-      else alert('Ajout de ressource impossible');
+      const payload = {
+        name: fd.get('name'),
+        type: fd.get('type'),
+        quantity: parseInt(fd.get('quantity')) || 1
+      };
+      const r = await fetch(`/api/spaces/${spaceId}/resources`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        credentials:'include',
+        body: JSON.stringify(payload)
+      });
+      if (r.ok) {
+        resAddForm.reset();
+        renderResources(spaceId);
+      } else {
+        alert('Ajout de ressource impossible');
+      }
     });
   }
 
@@ -107,18 +129,15 @@ document.addEventListener('DOMContentLoaded', () => {
     logout.addEventListener('click', async (e) => {
       e.preventDefault();
       await postJson('/api/logout', {});
-      // after logout, reload to hit the login page due to server-side auth requirement
       window.location.href = '/Login';
     });
   }
 
   if (document.getElementById('list')) loadList();
-  // Refresh user on page load and redirect to login if not authenticated and not already on /Login
   refreshUser().then(() => {
     const path = window.location.pathname.toLowerCase();
     const anonymous = ['/login', '/signup'];
     if (!anonymous.includes(path) && document.getElementById('loginForm') == null && document.getElementById('signupForm') == null) {
-      // If user is not authenticated, the server will redirect API calls to 401; attempt a quick check
       fetch('/api/me', { credentials: 'include' }).then(r => {
         if (!r.ok) window.location.href = '/Login';
       }).catch(() => { /* ignore */ });
@@ -132,7 +151,7 @@ function typeBadgeHtml(t){
 }
 
 function formatEuro(value){
-  return `${(Number(value) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+  return `${(Number(value) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} \u20ac`;
 }
 
 async function loadList() {
@@ -154,9 +173,9 @@ async function loadList() {
             <h5 class="card-title mb-1">${typeBadgeHtml(it.type)}${it.name}</h5>
             <span class="badge bg-light text-dark border">${price}</span>
           </div>
-          <p class="text-muted small mb-3"><i class="bi bi-people me-1"></i>Capacité : <strong>${it.capacity}</strong></p>
+          <p class="text-muted small mb-3"><i class="bi bi-people me-1"></i>Capacit\u00e9 : <strong>${it.capacity}</strong></p>
           <div class="d-flex gap-2 table-actions">
-            <button class="btn btn-sm btn-outline-secondary res-btn" data-id="${it.id}" data-name="${it.name}" title="Équipements"><i class="bi bi-tools"></i></button>
+            <button class="btn btn-sm btn-outline-secondary res-btn" data-id="${it.id}" data-name="${it.name}" title="\u00c9quipements"><i class="bi bi-tools"></i></button>
             <button class="btn btn-sm btn-outline-danger del-btn" data-id="${it.id}" title="Supprimer"><i class="bi bi-trash"></i></button>
           </div>
         </div>
@@ -168,7 +187,7 @@ async function loadList() {
     });
     col.querySelector('.res-btn').addEventListener('click', () => {
       document.querySelector('#resAddForm input[name=spaceId]').value = it.id;
-      document.getElementById('resTitle').textContent = '· ' + it.name;
+      document.getElementById('resTitle').textContent = '\u00b7 ' + it.name;
       renderResources(it.id);
       new bootstrap.Modal(document.getElementById('resModal')).show();
     });
@@ -182,12 +201,12 @@ async function renderResources(spaceId){
   const res = await fetch(`/api/spaces/${spaceId}/resources`, { credentials: 'include' });
   if (!res.ok) { list.innerHTML = '<li class="list-group-item text-danger">Chargement impossible</li>'; return; }
   const items = await res.json();
-  if (!items.length) { list.innerHTML = '<li class="list-group-item text-muted">Aucun équipement pour le moment.</li>'; return; }
+  if (!items.length) { list.innerHTML = '<li class="list-group-item text-muted">Aucun \u00e9quipement pour le moment.</li>'; return; }
   list.innerHTML = '';
   for (const r of items){
     const li = document.createElement('li');
     li.className = 'list-group-item d-flex justify-content-between align-items-center';
-    li.innerHTML = `<div><strong>${r.name}</strong> <span class="text-muted small">${r.type ? r.type + ' · ' : ''}x ${r.quantity}</span></div>
+    li.innerHTML = `<div><strong>${r.name}</strong> <span class="text-muted small">${r.type ? r.type + ' \u00b7 ' : ''}x ${r.quantity}</span></div>
       <button class="btn btn-sm btn-link text-danger"><i class="bi bi-x-circle"></i></button>`;
     li.querySelector('button').addEventListener('click', async () => {
       const d = await fetch(`/api/resources/${r.id}`, { method: 'DELETE', credentials: 'include' });

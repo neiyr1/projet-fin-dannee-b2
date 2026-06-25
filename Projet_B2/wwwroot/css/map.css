@@ -6,6 +6,25 @@
 .space-list li{padding:10px;border-radius:8px;cursor:pointer;border:1px solid transparent}
 .space-list li:hover{background:#fbfdff;border-color:#e6f0ff}
 .space-list li.selected{background:#eef6ff;border-color:#bfd7ff}
+#spaceList {
+  list-style: none;
+  list-style-type: none !important;
+  margin: 0;
+  padding-left: 0;
+}
+#spaceList .space-list-item {
+  display: block;
+  border: 0;
+  border-radius: 8px;
+  padding: .55rem .65rem;
+  cursor: pointer;
+  color: var(--ink);
+}
+#spaceList .space-list-item:hover,
+#spaceList .space-list-item.selected {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
 .map-area{display:flex;flex-direction:column;gap:8px}
 .map-container{background:var(--card, #fff);border-radius:10px;padding:12px;border:1px solid #eef2ff;min-height:420px;display:flex;align-items:center;justify-content:center}
 svg.space-map{width:100%;height:420px}

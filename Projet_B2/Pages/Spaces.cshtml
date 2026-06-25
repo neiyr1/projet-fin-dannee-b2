@@ -4,7 +4,7 @@
 <div class="page-heading">
   <div>
     <h1 class="h4 mb-0"><i class="bi bi-grid me-2 text-primary"></i>Espaces de coworking</h1>
-    <div class="text-muted small">Catalogue des postes, bureaux, salles, équipements et tarifs.</div>
+    <div class="text-muted small">Catalogue des postes, bureaux, salles, &eacute;quipements et tarifs.</div>
   </div>
   <a class="btn btn-outline-secondary btn-sm" href="/SpacesMap"><i class="bi bi-map me-1"></i>Plan visuel</a>
 </div>
@@ -14,7 +14,7 @@
     <form id="addForm" class="row g-2 align-items-end">
       <div class="col-sm">
         <label class="form-label small text-muted">Nom</label>
-        <input name="name" placeholder="Ex. Salle réunion F" required class="form-control" />
+        <input name="name" placeholder="Ex. Salle r&eacute;union F" required class="form-control" />
       </div>
       <div class="col-auto">
         <label class="form-label small text-muted">Type</label>
@@ -26,11 +26,11 @@
         </select>
       </div>
       <div class="col-auto">
-        <label class="form-label small text-muted">Capacité</label>
+        <label class="form-label small text-muted">Capacit&eacute;</label>
         <input name="capacity" type="number" min="1" placeholder="6" required class="form-control" style="width:100px" />
       </div>
       <div class="col-auto">
-        <label class="form-label small text-muted">Prix / h (€)</label>
+        <label class="form-label small text-muted">Prix / h (&euro;)</label>
         <input name="pricePerHour" type="number" min="0" step="0.5" placeholder="5" required class="form-control" style="width:120px" />
       </div>
       <div class="col-auto">
@@ -50,16 +50,39 @@
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title"><i class="bi bi-tools me-2"></i>Équipements <span id="resTitle" class="text-muted ms-1"></span></h5>
+        <h5 class="modal-title"><i class="bi bi-tools me-2"></i>&Eacute;quipements <span id="resTitle" class="text-muted ms-1"></span></h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
         <ul id="resList" class="list-group mb-3"></ul>
         <form id="resAddForm" class="row g-2 align-items-end">
-          <div class="col"><label class="form-label small text-muted">Nom</label><input name="name" required class="form-control" placeholder="Projecteur" /></div>
-          <div class="col-auto"><label class="form-label small text-muted">Type</label><input name="type" class="form-control" placeholder="AV" style="width:120px" /></div>
-          <div class="col-auto"><label class="form-label small text-muted">Qté</label><input name="quantity" type="number" min="1" value="1" class="form-control" style="width:80px" /></div>
-          <div class="col-auto"><button class="btn btn-primary" title="Ajouter"><i class="bi bi-plus-lg"></i></button></div>
+          <div class="col">
+            <label class="form-label small text-muted">&Eacute;quipement</label>
+            <select name="name" id="equipmentSelect" required class="form-select">
+              <option value="">Choisir un &eacute;quipement</option>
+              <option value="Projecteur" data-type="Audiovisuel">Projecteur</option>
+              <option value="Ecran" data-type="Audiovisuel">&Eacute;cran</option>
+              <option value="Tableau blanc" data-type="Mobilier">Tableau blanc</option>
+              <option value="Paperboard" data-type="Mobilier">Paperboard</option>
+              <option value="Micro" data-type="Audiovisuel">Micro</option>
+              <option value="Enceinte" data-type="Audiovisuel">Enceinte</option>
+              <option value="Webcam" data-type="Audiovisuel">Webcam</option>
+              <option value="Adaptateur HDMI" data-type="Connectique">Adaptateur HDMI</option>
+              <option value="Multiprise" data-type="Connectique">Multiprise</option>
+              <option value="Badge invite" data-type="Acces">Badge invit&eacute;</option>
+            </select>
+          </div>
+          <div class="col-auto">
+            <label class="form-label small text-muted">Type</label>
+            <input name="type" id="equipmentType" class="form-control" readonly placeholder="Type" style="width:130px" />
+          </div>
+          <div class="col-auto">
+            <label class="form-label small text-muted">Qt&eacute;</label>
+            <input name="quantity" type="number" min="1" value="1" class="form-control" style="width:80px" />
+          </div>
+          <div class="col-auto">
+            <button class="btn btn-primary" title="Ajouter"><i class="bi bi-plus-lg"></i></button>
+          </div>
           <input type="hidden" name="spaceId" />
         </form>
       </div>
