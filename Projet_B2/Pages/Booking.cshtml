@@ -1,18 +1,25 @@
 @page
-@{ Layout = "_Layout"; ViewData["Title"] = "Reservation"; }
+@{ Layout = "_Layout"; ViewData["Title"] = "Réservation"; }
 <div class="page-heading">
   <div>
-    <h1 class="h4 mb-0"><i class="bi bi-calendar-check me-2 text-primary"></i>Reserver un espace</h1>
-    <div class="text-muted small">Choisissez un espace, un creneau, puis confirmez ou ajoutez au panier.</div>
+    <h1 class="h4 mb-0"><i class="bi bi-calendar-check me-2 text-primary"></i>Réserver un espace</h1>
+    <div class="text-muted small">Choisissez un espace, un créneau, puis confirmez ou ajoutez au panier.</div>
   </div>
   <a class="btn btn-outline-secondary btn-sm" href="/SpacesMap"><i class="bi bi-map me-1"></i>Voir le plan</a>
 </div>
 <div id="bookingContainer">
-  <div class="row">
-    <div class="col-md-5">
-      <div class="card mb-3">
+  <div class="row g-3">
+    <div class="col-lg-5">
+      <div class="card booking-form-card mb-3">
         <div class="card-body">
           <form onsubmit="return false;" id="bookingForm">
+            <div class="booking-summary mb-3" id="spaceSummary">
+              <span class="booking-summary-icon"><i class="bi bi-building"></i></span>
+              <div>
+                <div class="fw-semibold" id="spaceSummaryName">Sélectionnez un espace</div>
+                <div class="text-muted small" id="spaceSummaryMeta">Capacité, type et tarif seront affichés ici.</div>
+              </div>
+            </div>
             <div class="mb-2">
               <label class="form-label">Type d'espace</label>
               <div class="btn-group btn-group-sm w-100" role="group" id="typeFilter">
@@ -34,11 +41,11 @@
               <div class="small text-muted mt-1" id="spaceEquipments"></div>
             </div>
             <div class="mb-2">
-              <label class="form-label">Creneaux rapides</label>
+              <label class="form-label">Créneaux rapides</label>
               <div class="btn-group btn-group-sm w-100" role="group">
-                <button type="button" class="btn btn-outline-secondary" data-slot="morning">Matin - 9h/13h</button>
-                <button type="button" class="btn btn-outline-secondary" data-slot="afternoon">Apres-midi - 14h/18h</button>
-                <button type="button" class="btn btn-outline-secondary" data-slot="day">Journee - 9h/18h</button>
+                <button type="button" class="btn btn-outline-secondary" data-slot="morning">Matin 9h-13h</button>
+                <button type="button" class="btn btn-outline-secondary" data-slot="afternoon">Après-midi 14h-18h</button>
+                <button type="button" class="btn btn-outline-secondary" data-slot="day">Journée 9h-18h</button>
               </div>
             </div>
             <div class="mb-3">
@@ -47,28 +54,28 @@
             </div>
             <div class="row g-2 mb-3">
               <div class="col-6">
-                <label class="form-label">Heure de debut</label>
+                <label class="form-label">Heure de début</label>
                 <input id="startInput" type="number" min="7" max="21" class="form-control" />
               </div>
               <div class="col-6">
-                <label class="form-label">Duree</label>
+                <label class="form-label">Durée</label>
                 <input id="hoursInput" type="number" min="1" max="12" class="form-control" />
               </div>
             </div>
             <div class="mb-3">
-              <label class="form-label">Invites <span class="text-muted small">(optionnel)</span></label>
+              <label class="form-label">Invités <span class="text-muted small">(optionnel)</span></label>
               <input id="attendeesInput" class="form-control" placeholder="alice@example.com, bob@example.com" />
-              <div class="form-text">Adresses e-mail separees par une virgule.</div>
+              <div class="form-text">Adresses e-mail séparées par une virgule.</div>
             </div>
             <div class="alert alert-light border d-flex justify-content-between align-items-center py-2 mb-3" id="priceBox">
-              <div class="small text-muted">Prix estime</div>
-            <div><span id="priceTotal" class="fw-bold fs-5">0.00 EUR</span> <span class="text-muted small" id="priceDetail"></span></div>
+              <div class="small text-muted">Prix estimé</div>
+              <div><span id="priceTotal" class="fw-bold fs-5">0,00 €</span> <span class="text-muted small" id="priceDetail"></span></div>
             </div>
             <div class="d-flex gap-2 align-items-center flex-wrap">
               <button id="bookBtn" class="btn btn-primary"><i class="bi bi-check2 me-1"></i>Confirmer</button>
               <button id="cartBtn" type="button" class="btn btn-outline-primary"><i class="bi bi-cart-plus me-1"></i>Ajouter au panier</button>
-              <div id="bookingMsg" class="text-muted small"></div>
             </div>
+            <div id="bookingMsg" class="small mt-3"></div>
           </form>
         </div>
       </div>
@@ -81,23 +88,23 @@
           </div>
           <ul id="cartList" class="list-group list-group-flush mb-2"></ul>
           <div class="d-flex justify-content-between align-items-center">
-            <div class="small text-muted">Total TTC <strong id="cartTotal" class="ms-1">0.00 EUR</strong></div>
+            <div class="small text-muted">Total TTC <strong id="cartTotal" class="ms-1">0,00 €</strong></div>
             <button id="checkoutBtn" class="btn btn-success btn-sm"><i class="bi bi-bag-check me-1"></i>Valider</button>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="col-md-7">
+    <div class="col-lg-7">
       <div class="card calendar-card mb-3">
         <div class="card-body">
           <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
             <div>
-              <h6 class="mb-1"><i class="bi bi-calendar-week me-2 text-primary"></i>Disponibilites de la semaine</h6>
-              <div class="text-muted small">Cliquez sur un creneau pour pre-remplir la reservation.</div>
+              <h6 class="mb-1"><i class="bi bi-calendar-week me-2 text-primary"></i>Disponibilités de la semaine</h6>
+              <div class="text-muted small">Cliquez sur un créneau libre ou partiel pour pré-remplir la réservation.</div>
             </div>
             <div class="d-flex align-items-center gap-2 flex-wrap">
-              <button id="prevWeek" class="btn btn-sm btn-outline-secondary" title="Semaine precedente"><i class="bi bi-chevron-left"></i></button>
+              <button id="prevWeek" class="btn btn-sm btn-outline-secondary" title="Semaine précédente"><i class="bi bi-chevron-left"></i></button>
               <button id="todayBtn" class="btn btn-sm btn-outline-primary">Aujourd'hui</button>
               <button id="nextWeek" class="btn btn-sm btn-outline-secondary" title="Semaine suivante"><i class="bi bi-chevron-right"></i></button>
             </div>
@@ -107,12 +114,12 @@
         </div>
       </div>
       <div id="bookedListArea" class="card card-body">
-        <h6 class="mb-2">Reservations du creneau</h6>
-        <div id="bookedList">Selectionnez une date ou un espace pour voir les reservations</div>
+        <h6 class="mb-2">Réservations du jour</h6>
+        <div id="bookedList">Sélectionnez une date ou un espace pour voir les réservations.</div>
       </div>
       <div class="card mt-3 d-none d-md-block">
         <div class="card-body">
-          <h6 class="mb-2">Legende</h6>
+          <h6 class="mb-2">Légende</h6>
           <div class="d-flex gap-2 align-items-center"><span class="badge bg-success">Libre</span><span class="badge bg-warning text-dark">Partiel</span><span class="badge bg-danger">Complet</span></div>
         </div>
       </div>

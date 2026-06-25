@@ -1,9 +1,9 @@
 @page
-@{ Layout = "_Layout"; ViewData["Title"] = "Reservations admin"; }
+@{ Layout = "_Layout"; ViewData["Title"] = "Réservations admin"; }
 
 <div class="page-heading">
   <div>
-    <h1 class="h4 mb-0"><i class="bi bi-clipboard-check me-2 text-warning"></i>Reservations</h1>
+    <h1 class="h4 mb-0"><i class="bi bi-clipboard-check me-2 text-warning"></i>Réservations</h1>
     <div class="text-muted small">Vue admin, filtres, factures et export CSV local.</div>
   </div>
   <div class="d-flex gap-2 align-items-center flex-wrap">
@@ -12,8 +12,8 @@
     <input type="date" id="to" class="form-control form-control-sm" style="width:160px" />
     <select id="status" class="form-select form-select-sm" style="width:140px">
       <option value="">Tous statuts</option>
-      <option value="Booked">Confirmee</option>
-      <option value="Cancelled">Annulee</option>
+      <option value="Booked">Confirmée</option>
+      <option value="Cancelled">Annulée</option>
     </select>
     <button id="refresh" class="btn btn-outline-secondary btn-sm" title="Actualiser"><i class="bi bi-arrow-clockwise"></i></button>
     <button id="exportCsv" class="btn btn-outline-primary btn-sm" title="Exporter CSV"><i class="bi bi-filetype-csv me-1"></i>CSV</button>
@@ -21,10 +21,10 @@
 </div>
 
 <div class="row g-2 mb-3" id="kpis">
-  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body py-2"><div class="small text-muted">Reservations affichees</div><div class="fs-5 fw-bold" id="kpiTotal">0</div></div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body py-2"><div class="small text-muted">Réservations affichées</div><div class="fs-5 fw-bold" id="kpiTotal">0</div></div></div></div>
   <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body py-2"><div class="small text-muted">Actives</div><div class="fs-5 fw-bold text-success" id="kpiActive">0</div></div></div></div>
-  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body py-2"><div class="small text-muted">Annulees</div><div class="fs-5 fw-bold text-secondary" id="kpiCancelled">0</div></div></div></div>
-  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body py-2"><div class="small text-muted">CA TTC</div><div class="fs-5 fw-bold text-primary" id="kpiRevenue">0.00 EUR</div></div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body py-2"><div class="small text-muted">Annulées</div><div class="fs-5 fw-bold text-secondary" id="kpiCancelled">0</div></div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body py-2"><div class="small text-muted">CA TTC</div><div class="fs-5 fw-bold text-primary" id="kpiRevenue">0,00 €</div></div></div></div>
 </div>
 
 <div class="card">
@@ -33,7 +33,7 @@
       <table class="table table-hover align-middle mb-0">
         <thead class="table-light">
           <tr>
-            <th>#</th><th>Date</th><th>Creneau</th><th>Espace</th><th>Client</th><th>Statut</th><th class="text-end">Total</th><th class="text-end pe-3">Facture</th>
+            <th>#</th><th>Date</th><th>Créneau</th><th>Espace</th><th class="wrap">Client</th><th>Statut</th><th class="text-end">Total</th><th class="text-end pe-3">Facture</th>
           </tr>
         </thead>
         <tbody id="resBody">
@@ -60,7 +60,7 @@
     if (st) q.set('status', st);
     const res = await fetch('/api/reservations/all?' + q.toString(), { credentials: 'include' });
     if (res.status === 401) { location.href = '/Login'; return; }
-    if (res.status === 403) { tbody.innerHTML = '<tr><td colspan="8" class="text-center text-danger py-4">Role admin requis.</td></tr>'; return; }
+    if (res.status === 403) { tbody.innerHTML = '<tr><td colspan="8" class="text-center text-danger py-4">Rôle admin requis.</td></tr>'; return; }
     const items = await res.json();
     currentItems = items;
     let active = 0, cancelled = 0, revenue = 0;
@@ -71,8 +71,8 @@
         if (r.status === 'Cancelled') cancelled++;
         else { active++; revenue += (r.totalTTC || 0); }
         const statusBadge = r.status === 'Cancelled'
-          ? '<span class="badge status-cancelled">Annulee</span>'
-          : '<span class="badge status-booked">Confirmee</span>';
+          ? '<span class="badge status-soft-muted">Annulée</span>'
+          : '<span class="badge status-soft-success">Confirmée</span>';
         const invoice = r.invoiceNumber
           ? `<a class="btn btn-sm btn-outline-primary" href="/api/invoices/${r.id}" target="_blank"><i class="bi bi-file-earmark-pdf me-1"></i>${r.invoiceNumber}</a>`
           : '<span class="text-muted small">-</span>';
@@ -80,11 +80,11 @@
         tr.innerHTML = `
           <td class="text-muted">#${r.id}</td>
           <td>${r.date || ''}</td>
-          <td>${fmtTime(r.startHour)} a ${fmtTime(r.startHour + r.hours)} <span class="text-muted small">(${r.hours}h)</span></td>
+          <td>${fmtTime(r.startHour)} à ${fmtTime(r.startHour + r.hours)} <span class="text-muted small">(${r.hours}h)</span></td>
           <td><strong>${r.spaceName || ''}</strong></td>
           <td>${r.ownerName || ''}<div class="text-muted small">${r.ownerEmail || ''}</div></td>
           <td>${statusBadge}</td>
-          <td class="text-end fw-semibold">${(r.totalTTC || 0).toFixed(2)} EUR</td>
+          <td class="text-end fw-semibold">${(r.totalTTC || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
           <td class="text-end pe-3">${invoice}</td>`;
         tbody.appendChild(tr);
       }
@@ -92,7 +92,7 @@
     document.getElementById('kpiTotal').textContent = items.length;
     document.getElementById('kpiActive').textContent = active;
     document.getElementById('kpiCancelled').textContent = cancelled;
-    document.getElementById('kpiRevenue').textContent = revenue.toFixed(2) + ' EUR';
+    document.getElementById('kpiRevenue').textContent = revenue.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
   }
 
   document.getElementById('refresh').addEventListener('click', load);

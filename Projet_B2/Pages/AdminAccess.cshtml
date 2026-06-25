@@ -1,10 +1,10 @@
 @page
-@{ Layout = "_Layout"; ViewData["Title"] = "Controle QR"; }
+@{ Layout = "_Layout"; ViewData["Title"] = "Contrôle QR"; }
 
 <div class="page-heading">
   <div>
-    <h1 class="h4 mb-0"><i class="bi bi-shield-check me-2 text-success"></i>Controle QR</h1>
-    <div class="text-muted small">Accueil: collez un token QR pour verifier un acces.</div>
+    <h1 class="h4 mb-0"><i class="bi bi-shield-check me-2 text-success"></i>Contrôle QR</h1>
+    <div class="text-muted small">Accueil : collez un token QR pour vérifier un accès.</div>
   </div>
 </div>
 
@@ -16,9 +16,9 @@
         <div class="input-group">
           <span class="input-group-text"><i class="bi bi-qr-code"></i></span>
           <input type="text" id="token" class="form-control" placeholder="Coller le token ici" autofocus />
-          <button id="verify" class="btn btn-primary"><i class="bi bi-check2-square me-1"></i>Verifier</button>
+          <button id="verify" class="btn btn-primary"><i class="bi bi-check2-square me-1"></i>Vérifier</button>
         </div>
-        <div class="form-text">Le token est integre dans le QR code de la reservation.</div>
+        <div class="form-text">Le token est intégré dans le QR code de la réservation.</div>
       </div>
     </div>
 
@@ -33,15 +33,15 @@ document.getElementById('verify').addEventListener('click', async () => {
   if (!token) return;
   const res = await fetch('/api/access/verify', { method: 'POST', headers: {'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ token }) });
   if (res.status === 401) { location.href = '/Login'; return; }
-  if (res.status === 403) { result.innerHTML = '<div class="alert alert-danger">Role admin ou accueil requis.</div>'; return; }
+  if (res.status === 403) { result.innerHTML = '<div class="alert alert-danger">Rôle admin ou accueil requis.</div>'; return; }
   const data = await res.json();
   if (data.granted){
-    result.innerHTML = `<div class="alert alert-success"><h5 class="mb-2"><i class="bi bi-check-circle me-2"></i>Acces autorise</h5>
+    result.innerHTML = `<div class="alert alert-success"><h5 class="mb-2"><i class="bi bi-check-circle me-2"></i>Accès autorisé</h5>
       <div><strong>${data.owner}</strong> - <strong>${data.space}</strong></div>
-      <div class="small text-muted">${new Date(data.start).toLocaleString()} a ${new Date(data.end).toLocaleString()}</div></div>`;
+      <div class="small text-muted">${new Date(data.start).toLocaleString()} à ${new Date(data.end).toLocaleString()}</div></div>`;
   } else {
-    result.innerHTML = `<div class="alert alert-danger"><h5 class="mb-2"><i class="bi bi-x-circle me-2"></i>Acces refuse</h5>
-      <div class="small">${data.reason || 'Hors creneau de reservation ou reservation annulee.'}</div></div>`;
+    result.innerHTML = `<div class="alert alert-danger"><h5 class="mb-2"><i class="bi bi-x-circle me-2"></i>Accès refusé</h5>
+      <div class="small">${data.reason || 'Hors créneau de réservation ou réservation annulée.'}</div></div>`;
   }
 });
 document.getElementById('token').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('verify').click(); });

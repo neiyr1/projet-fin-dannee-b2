@@ -4,15 +4,15 @@
 <div class="page-heading">
   <div>
     <h1 class="h4 mb-0"><i class="bi bi-speedometer2 me-2 text-primary"></i>Tableau de bord admin</h1>
-    <div class="text-muted small">Occupation, chiffre d'affaires et espaces les plus utilises.</div>
+    <div class="text-muted small">Occupation, chiffre d'affaires et espaces les plus utilisés.</div>
   </div>
   <a href="/api/admin/backup" class="btn btn-outline-dark btn-sm"><i class="bi bi-download me-1"></i>Sauvegarde BDD</a>
 </div>
 
 <div class="row g-3 mb-3">
   <div class="col-md-3"><div class="card stat-card"><div class="card-body"><div class="text-muted small">Aujourd'hui</div><div class="fs-3 fw-bold" id="k-today">--</div></div></div></div>
-  <div class="col-md-3"><div class="card stat-card"><div class="card-body"><div class="text-muted small">Reservations actives</div><div class="fs-3 fw-bold text-success" id="k-active">--</div></div></div></div>
-  <div class="col-md-3"><div class="card stat-card"><div class="card-body"><div class="text-muted small">Annulees</div><div class="fs-3 fw-bold text-secondary" id="k-cancel">--</div></div></div></div>
+  <div class="col-md-3"><div class="card stat-card"><div class="card-body"><div class="text-muted small">Réservations actives</div><div class="fs-3 fw-bold text-success" id="k-active">--</div></div></div></div>
+  <div class="col-md-3"><div class="card stat-card"><div class="card-body"><div class="text-muted small">Annulées</div><div class="fs-3 fw-bold text-secondary" id="k-cancel">--</div></div></div></div>
   <div class="col-md-3"><div class="card stat-card"><div class="card-body"><div class="text-muted small">CA TTC</div><div class="fs-3 fw-bold text-primary" id="k-revenue">--</div></div></div></div>
 </div>
 
@@ -21,7 +21,7 @@
     <div class="card h-100"><div class="card-body">
       <h6 class="text-muted text-uppercase small mb-2">Occupation (7 derniers jours)</h6>
       <div class="fs-1 fw-bold" id="k-occ">--</div>
-      <div class="text-muted small">Heures utilisees / capacite hebdomadaire</div>
+      <div class="text-muted small">Heures utilisées / capacité hebdomadaire</div>
       <div class="progress mt-2" style="height:10px"><div class="progress-bar" id="occ-bar" style="width:0%"></div></div>
     </div></div>
   </div>
@@ -39,10 +39,10 @@
     <div class="card h-100"><div class="card-body">
       <h6 class="text-muted text-uppercase small mb-2">Raccourcis admin</h6>
       <div class="d-grid gap-2">
-        <a href="/AdminReservations" class="btn btn-sm btn-outline-primary text-start"><i class="bi bi-clipboard-check me-2"></i>Reservations</a>
+        <a href="/AdminReservations" class="btn btn-sm btn-outline-primary text-start"><i class="bi bi-clipboard-check me-2"></i>Réservations</a>
         <a href="/AdminUsers" class="btn btn-sm btn-outline-primary text-start"><i class="bi bi-people me-2"></i>Utilisateurs</a>
         <a href="/AdminAudit" class="btn btn-sm btn-outline-primary text-start"><i class="bi bi-journal-text me-2"></i>Audit</a>
-        <a href="/AdminAccess" class="btn btn-sm btn-outline-primary text-start"><i class="bi bi-shield-check me-2"></i>Controle QR</a>
+        <a href="/AdminAccess" class="btn btn-sm btn-outline-primary text-start"><i class="bi bi-shield-check me-2"></i>Contrôle QR</a>
       </div>
     </div></div>
   </div>
@@ -50,9 +50,9 @@
 
 <div class="card">
   <div class="card-body">
-    <h6 class="text-muted text-uppercase small mb-2">Espaces les plus utilises</h6>
+    <h6 class="text-muted text-uppercase small mb-2">Espaces les plus utilisés</h6>
     <table class="table table-sm align-middle mb-0" id="top-table">
-      <thead><tr><th>Espace</th><th class="text-end">Reservations</th><th class="text-end">Heures</th><th>Usage</th></tr></thead>
+      <thead><tr><th>Espace</th><th class="text-end">Réservations</th><th class="text-end">Heures</th><th>Usage</th></tr></thead>
       <tbody><tr><td colspan="4" class="text-center text-muted">Chargement...</td></tr></tbody>
     </table>
   </div>
@@ -62,12 +62,12 @@
 (async function(){
   const res = await fetch('/api/admin/dashboard', { credentials: 'include' });
   if (res.status === 401) { location.href = '/Login'; return; }
-  if (res.status === 403) { document.querySelector('.container').innerHTML = '<div class="alert alert-danger">Role admin requis.</div>'; return; }
+  if (res.status === 403) { document.querySelector('.container').innerHTML = '<div class="alert alert-danger">Rôle admin requis.</div>'; return; }
   const d = await res.json();
   document.getElementById('k-today').textContent = d.totals.bookingsToday;
   document.getElementById('k-active').textContent = d.totals.bookingsActive;
   document.getElementById('k-cancel').textContent = d.totals.bookingsCancelled;
-  document.getElementById('k-revenue').textContent = (d.revenue.ttc || 0).toFixed(2) + ' EUR';
+  document.getElementById('k-revenue').textContent = (d.revenue.ttc || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
   document.getElementById('k-occ').textContent = d.occupancyWeek + '%';
   document.getElementById('occ-bar').style.width = Math.min(100, d.occupancyWeek) + '%';
   document.getElementById('k-users').textContent = d.totals.users;
@@ -86,6 +86,6 @@
       <td><div class="progress" style="height:8px"><div class="progress-bar bg-primary" style="width:${pct}%"></div></div></td>`;
     tbody.appendChild(tr);
   }
-  if (!d.topSpaces.length) tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Pas encore de donnees.</td></tr>';
+  if (!d.topSpaces.length) tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Pas encore de données.</td></tr>';
 })();
 </script>

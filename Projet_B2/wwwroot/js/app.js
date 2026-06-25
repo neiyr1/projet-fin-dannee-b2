@@ -131,6 +131,10 @@ function typeBadgeHtml(t){
   return t ? `<span class="badge ${map[t] || 'bg-secondary'} me-2">${t}</span>` : '';
 }
 
+function formatEuro(value){
+  return `${(Number(value) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+}
+
 async function loadList() {
   const res = await fetch('/api/spaces', { credentials: 'include' });
   if (res.status === 401) { location.href = '/Login'; return; }
@@ -142,15 +146,18 @@ async function loadList() {
   for (const it of items) {
     const col = document.createElement('div');
     col.className = 'col-md-4';
-      const price = (it.pricePerHour != null) ? `${it.pricePerHour.toFixed(2)} EUR/h` : '-';
+    const price = (it.pricePerHour != null) ? `${formatEuro(it.pricePerHour)}/h` : '-';
     col.innerHTML = `
-      <div class="card h-100">
+      <div class="card space-card h-100">
         <div class="card-body">
-          <h5 class="card-title mb-1">${typeBadgeHtml(it.type)}<i class="bi bi-grid me-2 text-primary"></i>${it.name}</h5>
-              <p class="text-muted small mb-2">Capacite: <strong>${it.capacity}</strong> - ${price}</p>
-          <div class="d-flex gap-2">
-            <button class="btn btn-sm btn-outline-secondary res-btn" data-id="${it.id}" data-name="${it.name}"><i class="bi bi-tools me-1"></i>Equipements</button>
-            <button class="btn btn-sm btn-outline-danger del-btn" data-id="${it.id}"><i class="bi bi-trash"></i></button>
+          <div class="d-flex justify-content-between align-items-start gap-2">
+            <h5 class="card-title mb-1">${typeBadgeHtml(it.type)}${it.name}</h5>
+            <span class="badge bg-light text-dark border">${price}</span>
+          </div>
+          <p class="text-muted small mb-3"><i class="bi bi-people me-1"></i>Capacité : <strong>${it.capacity}</strong></p>
+          <div class="d-flex gap-2 table-actions">
+            <button class="btn btn-sm btn-outline-secondary res-btn" data-id="${it.id}" data-name="${it.name}" title="Équipements"><i class="bi bi-tools"></i></button>
+            <button class="btn btn-sm btn-outline-danger del-btn" data-id="${it.id}" title="Supprimer"><i class="bi bi-trash"></i></button>
           </div>
         </div>
       </div>`;
@@ -161,7 +168,7 @@ async function loadList() {
     });
     col.querySelector('.res-btn').addEventListener('click', () => {
       document.querySelector('#resAddForm input[name=spaceId]').value = it.id;
-      document.getElementById('resTitle').textContent = '- ' + it.name;
+      document.getElementById('resTitle').textContent = '· ' + it.name;
       renderResources(it.id);
       new bootstrap.Modal(document.getElementById('resModal')).show();
     });
@@ -175,12 +182,12 @@ async function renderResources(spaceId){
   const res = await fetch(`/api/spaces/${spaceId}/resources`, { credentials: 'include' });
   if (!res.ok) { list.innerHTML = '<li class="list-group-item text-danger">Chargement impossible</li>'; return; }
   const items = await res.json();
-  if (!items.length) { list.innerHTML = '<li class="list-group-item text-muted">Aucun equipement pour le moment.</li>'; return; }
+  if (!items.length) { list.innerHTML = '<li class="list-group-item text-muted">Aucun équipement pour le moment.</li>'; return; }
   list.innerHTML = '';
   for (const r of items){
     const li = document.createElement('li');
     li.className = 'list-group-item d-flex justify-content-between align-items-center';
-        li.innerHTML = `<div><strong>${r.name}</strong> <span class="text-muted small">${r.type ? r.type + ' - ' : ''}x ${r.quantity}</span></div>
+    li.innerHTML = `<div><strong>${r.name}</strong> <span class="text-muted small">${r.type ? r.type + ' · ' : ''}x ${r.quantity}</span></div>
       <button class="btn btn-sm btn-link text-danger"><i class="bi bi-x-circle"></i></button>`;
     li.querySelector('button').addEventListener('click', async () => {
       const d = await fetch(`/api/resources/${r.id}`, { method: 'DELETE', credentials: 'include' });

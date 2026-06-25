@@ -1,26 +1,26 @@
 @page
-@{ Layout = "_Layout"; ViewData["Title"] = "Mes reservations"; }
+@{ Layout = "_Layout"; ViewData["Title"] = "Mes réservations"; }
 
 <div class="page-heading">
   <div>
-    <h1 class="h4 mb-0"><i class="bi bi-calendar-check me-2 text-warning"></i>Mes reservations</h1>
+    <h1 class="h4 mb-0"><i class="bi bi-calendar-check me-2 text-warning"></i>Mes réservations</h1>
     <div class="text-muted small">Suivi, facture, QR code, modification et annulation.</div>
   </div>
-  <a class="btn btn-primary btn-sm" href="/Booking"><i class="bi bi-plus-lg me-1"></i>Nouvelle reservation</a>
+  <a class="btn btn-primary btn-sm" href="/Booking"><i class="bi bi-plus-lg me-1"></i>Nouvelle réservation</a>
 </div>
 
 <div id="resList" class="row g-3"></div>
 <div id="emptyState" class="text-center text-muted py-5" style="display:none">
   <i class="bi bi-inbox fs-1"></i>
-  <p class="mt-2">Vous n'avez pas encore de reservation.</p>
-  <a class="btn btn-primary" href="/Booking">Reserver</a>
+  <p class="mt-2">Vous n'avez pas encore de réservation.</p>
+  <a class="btn btn-primary" href="/Booking">Réserver</a>
 </div>
 
 <!-- QR modal -->
 <div class="modal fade" id="qrModal" tabindex="-1">
   <div class="modal-dialog modal-sm">
     <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title">Votre QR code d'acces</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-header"><h5 class="modal-title">Votre QR code d'accès</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body text-center">
         <img id="qrImg" alt="QR code" style="max-width:100%;border:1px solid #eee;border-radius:8px" />
         <div class="small text-muted mt-2" id="qrCaption"></div>
@@ -34,12 +34,12 @@
   <div class="modal-dialog">
     <div class="modal-content">
       <form id="modForm">
-        <div class="modal-header"><h5 class="modal-title"><i class="bi bi-pencil me-2"></i>Modifier la reservation</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-header"><h5 class="modal-title"><i class="bi bi-pencil me-2"></i>Modifier la réservation</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
           <div class="mb-3"><label class="form-label">Date</label><input type="date" name="date" class="form-control" required /></div>
           <div class="row g-2">
-            <div class="col"><label class="form-label">Heure de debut</label><input type="number" name="startHour" min="7" max="21" class="form-control" required /></div>
-            <div class="col"><label class="form-label">Duree</label><input type="number" name="hours" min="1" max="12" class="form-control" required /></div>
+            <div class="col"><label class="form-label">Heure de début</label><input type="number" name="startHour" min="7" max="21" class="form-control" required /></div>
+            <div class="col"><label class="form-label">Durée</label><input type="number" name="hours" min="1" max="12" class="form-control" required /></div>
           </div>
           <input type="hidden" name="id" />
           <div id="modMsg" class="text-danger small mt-2"></div>
@@ -71,26 +71,26 @@
     empty.style.display = items.length ? 'none' : '';
     for (const r of items){
       const statusBadge = r.status === 'Cancelled'
-        ? '<span class="badge status-cancelled">Annulee</span>'
-        : '<span class="badge status-booked">Confirmee</span>';
+        ? '<span class="badge status-soft-muted"><i class="bi bi-x-circle me-1"></i>Annulée</span>'
+        : '<span class="badge status-soft-success"><i class="bi bi-check-circle me-1"></i>Confirmée</span>';
       const invoice = r.invoiceNumber
         ? `<a class="btn btn-sm btn-outline-primary" href="/api/invoices/${r.id}" target="_blank"><i class="bi bi-file-earmark-pdf me-1"></i>${r.invoiceNumber}</a>`
         : '<span class="text-muted small">Pas de facture</span>';
       const isActive = r.status !== 'Cancelled';
-      const qrBtn = isActive ? `<button class="btn btn-sm btn-outline-dark qr-btn" data-id="${r.id}" data-label="${r.spaceName}"><i class="bi bi-qr-code"></i></button>` : '';
-      const modBtn = isActive ? `<button class="btn btn-sm btn-outline-secondary mod-btn" data-id="${r.id}" data-date="${r.date}" data-start="${r.startHour}" data-hours="${r.hours}"><i class="bi bi-pencil"></i></button>` : '';
-      const cancelBtn = isActive ? `<button class="btn btn-sm btn-outline-danger del-btn" data-id="${r.id}"><i class="bi bi-x-circle"></i></button>` : '';
+      const qrBtn = isActive ? `<button class="btn btn-sm btn-outline-dark qr-btn" data-id="${r.id}" data-label="${r.spaceName}" title="Afficher le QR code"><i class="bi bi-qr-code"></i></button>` : '';
+      const modBtn = isActive ? `<button class="btn btn-sm btn-outline-secondary mod-btn" data-id="${r.id}" data-date="${r.date}" data-start="${r.startHour}" data-hours="${r.hours}" title="Modifier"><i class="bi bi-pencil"></i></button>` : '';
+      const cancelBtn = isActive ? `<button class="btn btn-sm btn-outline-danger del-btn" data-id="${r.id}" title="Annuler"><i class="bi bi-x-circle"></i></button>` : '';
       const attLine = r.attendees ? `<div class="small text-muted"><i class="bi bi-people me-1"></i>${r.attendees}</div>` : '';
 
       const col = document.createElement('div');
       col.className = 'col-md-6';
       col.innerHTML = `
-        <div class="card h-100">
+        <div class="card reservation-card h-100">
           <div class="card-body">
             <div class="d-flex justify-content-between align-items-start">
               <div>
-                <h5 class="card-title mb-1">${typeBadge(r.spaceType)}${r.spaceName || 'Space #' + r.id}</h5>
-            <div class="text-muted small">${r.date} - ${String(r.startHour).padStart(2,'0')}:00 a ${String(r.startHour + r.hours).padStart(2,'0')}:00 (${r.hours}h)</div>
+                <h5 class="card-title mb-1">${typeBadge(r.spaceType)}${r.spaceName || 'Espace #' + r.id}</h5>
+            <div class="text-muted small"><i class="bi bi-clock me-1"></i>${r.date} - ${String(r.startHour).padStart(2,'0')}:00 à ${String(r.startHour + r.hours).padStart(2,'0')}:00 (${r.hours}h)</div>
                 ${attLine}
               </div>
               ${statusBadge}
@@ -99,9 +99,9 @@
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
               <div>
                 <div class="small text-muted">Total TTC</div>
-            <div class="fw-bold">${(r.totalTTC || 0).toFixed(2)} EUR</div>
+            <div class="fw-bold">${(r.totalTTC || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
               </div>
-              <div class="d-flex gap-2 flex-wrap justify-content-end">${invoice}${qrBtn}${modBtn}${cancelBtn}</div>
+              <div class="d-flex gap-2 flex-wrap justify-content-end reservation-actions">${invoice}${qrBtn}${modBtn}${cancelBtn}</div>
             </div>
           </div>
         </div>`;
@@ -109,7 +109,7 @@
 
       const del = col.querySelector('.del-btn');
       if (del) del.addEventListener('click', async () => {
-        if (!confirm('Annuler cette reservation ?')) return;
+        if (!confirm('Annuler cette réservation ?')) return;
         const d = await fetch(`/api/reservations/${r.id}`, { method: 'DELETE', credentials: 'include' });
         if (d.ok) load(); else alert('Annulation impossible');
       });

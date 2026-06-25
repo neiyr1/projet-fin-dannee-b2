@@ -14,17 +14,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let typeFilter = '';
 
+    const euro = value => `${(Number(value) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+    const localDate = date => date.toLocaleDateString('fr-FR');
+    const isoDate = date => {
+      const d = new Date(date);
+      d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+      return d.toISOString().slice(0, 10);
+    };
+
+    function setMessage(text, type = 'muted', html = false){
+      if (!msg) return;
+      const classes = {
+        success: 'alert alert-success py-2 mb-0',
+        danger: 'alert alert-danger py-2 mb-0',
+        warning: 'alert alert-warning py-2 mb-0',
+        info: 'alert alert-info py-2 mb-0',
+        muted: 'text-muted'
+      };
+      msg.className = `small mt-3 ${classes[type] || classes.muted}`;
+      if (html) msg.innerHTML = text;
+      else msg.textContent = text;
+    }
+
     function applyTypeFilter(){
       const filtered = typeFilter ? rooms.filter(r => r.type === typeFilter) : rooms;
       spaceSel.innerHTML = '';
       for (const s of filtered){
         const opt = document.createElement('option');
-        const priceLabel = (s.pricePerHour != null) ? ` - ${s.pricePerHour.toFixed(2)} EUR/h` : '';
+        const priceLabel = (s.pricePerHour != null) ? ` - ${euro(s.pricePerHour)}/h` : '';
         const typeLabel = s.type ? ` - ${s.type}` : '';
         opt.value = s.id; opt.textContent = `${s.name} (cap. ${s.capacity})${typeLabel}${priceLabel}`;
         spaceSel.appendChild(opt);
       }
       updatePricePreview();
+      updateSpaceSummary();
       loadEquipments();
     }
 
@@ -35,7 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const res = await fetch(`/api/spaces/${spaceSel.value}/resources`, { credentials: 'include' });
         if (!res.ok) { eq.textContent = ''; return; }
         const items = await res.json();
-        if (!items.length) { eq.innerHTML = '<i class="bi bi-info-circle me-1"></i>Aucun equipement renseigne'; return; }
+        if (!items.length) { eq.innerHTML = '<i class="bi bi-info-circle me-1"></i>Aucun équipement renseigné'; return; }
         eq.innerHTML = items.map(r => `<span class="badge bg-light text-dark border me-1"><i class="bi bi-tools me-1"></i>${r.name}${r.quantity > 1 ? ' x' + r.quantity : ''}</span>`).join('');
       } catch { eq.textContent = ''; }
     }
@@ -84,7 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // react to a global event from the map if fired
     document.addEventListener('space:selected', (ev)=>{
       try{
-        const id = ev?.detail?.id;
+        const id = ev && ev.detail ? ev.detail.id : null;
         if (id) {
           showBookingForSpace(id);
         }
@@ -118,11 +141,25 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!priceTotal) return;
       const sp = rooms.find(r => String(r.id) === String(spaceSel.value));
       const hours = Math.max(1, parseInt(hoursInput.value,10) || 1);
-      const rate = sp?.pricePerHour ?? 0;
+      const rate = sp && sp.pricePerHour != null ? sp.pricePerHour : 0;
       const ht = rate * hours;
       const ttc = ht * 1.20;
-      priceTotal.textContent = `${ttc.toFixed(2)} EUR TTC`;
-      priceDetail.textContent = sp ? `(${rate.toFixed(2)} EUR/h x ${hours}h - HT ${ht.toFixed(2)} EUR)` : '';
+      priceTotal.textContent = `${euro(ttc)} TTC`;
+      priceDetail.textContent = sp ? `(${euro(rate)}/h x ${hours}h - HT ${euro(ht)})` : '';
+    }
+
+    function updateSpaceSummary(){
+      const nameEl = document.getElementById('spaceSummaryName');
+      const metaEl = document.getElementById('spaceSummaryMeta');
+      if (!nameEl || !metaEl) return;
+      const sp = rooms.find(r => String(r.id) === String(spaceSel.value));
+      if (!sp) {
+        nameEl.textContent = 'Sélectionnez un espace';
+        metaEl.textContent = 'Capacité, type et tarif seront affichés ici.';
+        return;
+      }
+      nameEl.textContent = sp.name;
+      metaEl.textContent = `${sp.type || 'Espace'} · capacité ${sp.capacity || 1} · ${euro(sp.pricePerHour || 0)}/h HT`;
     }
 
     function validateSelection(){
@@ -131,12 +168,12 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!spaceSel.value) return 'Choisissez un espace.';
       if (!dateInput.value) return 'Choisissez une date.';
       if (!Number.isInteger(start) || start < 7 || start > 21) return 'Choisissez une heure entre 7h et 21h.';
-      if (!Number.isInteger(hours) || hours < 1 || hours > 12) return 'La duree doit etre comprise entre 1h et 12h.';
-      if (start + hours > 22) return 'Le creneau doit se terminer au plus tard a 22h.';
+      if (!Number.isInteger(hours) || hours < 1 || hours > 12) return 'La durée doit être comprise entre 1h et 12h.';
+      if (start + hours > 22) return 'Le créneau doit se terminer au plus tard à 22h.';
       return null;
     }
 
-    spaceSel.addEventListener('change', updatePricePreview);
+    spaceSel.addEventListener('change', () => { updatePricePreview(); updateSpaceSummary(); });
     hoursInput.addEventListener('input', updatePricePreview);
 
     bookBtn.addEventListener('click', async (e)=>{
@@ -147,14 +184,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const dateVal = dateInput.value;
       const validationError = validateSelection();
       if (validationError) {
-        msg.style.color = 'red';
-        msg.textContent = validationError;
+        setMessage(validationError, 'danger');
         return;
       }
       bookBtn.disabled = true;
-      msg.style.color = '';
-      msg.textContent = 'Reservation en cours...';
-      const attendeesText = (document.getElementById('attendeesInput')?.value || '').trim();
+      setMessage('Réservation en cours...', 'info');
+      const attendeesEl = document.getElementById('attendeesInput');
+      const attendeesText = ((attendeesEl && attendeesEl.value) || '').trim();
       const attendees = attendeesText ? attendeesText.split(/[,;\s]+/).filter(s => s.includes('@')) : [];
       const payload = {
         spaceId,
@@ -167,17 +203,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const res = await fetch('/api/reservations', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload), credentials: 'include' });
         if (res.ok){
           const data = await res.json().catch(()=>null);
-          const inv = data?.invoiceNumber ? ` - Facture ${data.invoiceNumber}` : '';
-          msg.innerHTML = `Reservation confirmee${inv} <a href="/MyReservations" class="ms-2">Voir mes reservations</a>`;
-          msg.style.color = 'green';
+          const inv = data && data.invoiceNumber ? ` - Facture ${data.invoiceNumber}` : '';
+          setMessage(`Réservation confirmée${inv} <a href="/MyReservations" class="ms-2">Voir mes réservations</a>`, 'success', true);
           await fetchBookedSlots(); renderWeek();
         } else if (res.status === 409) {
           const j = await res.json().catch(()=>null);
-          msg.textContent = j?.error || 'Creneau deja reserve';
-          msg.style.color = 'red';
+          setMessage((j && j.error) || 'Créneau déjà réservé', 'danger');
         } else {
           const j = await res.json().catch(()=>null);
-          msg.textContent = j?.error || 'Reservation impossible'; msg.style.color='red';
+          setMessage((j && j.error) || 'Réservation impossible', 'danger');
         }
       } finally {
         bookBtn.disabled = false;
@@ -188,30 +222,30 @@ document.addEventListener('DOMContentLoaded', () => {
       const out = document.getElementById('bookedList') || createBookedList();
       out.innerHTML = 'Chargement...';
       const sp = parseInt(spaceSel.value,10);
-      if (!sp) { out.innerHTML = 'Aucun espace selectionne'; return; }
-      const d = dateInput.value || new Date().toISOString().slice(0,10);
+      if (!sp) { out.innerHTML = 'Aucun espace sélectionné'; return; }
+      const d = dateInput.value || isoDate(new Date());
       const res = await fetch(`/api/reservations/space?spaceId=${sp}&date=${encodeURIComponent(d)}`, { credentials: 'include' });
-      if (!res.ok) { out.innerHTML = 'Chargement des reservations impossible'; return; }
+      if (!res.ok) { out.innerHTML = 'Chargement des réservations impossible'; return; }
       const items = await res.json();
       out.innerHTML = '';
-      if (!items.length) { out.innerHTML = 'Aucune reservation pour cette date'; return; }
+      if (!items.length) { out.innerHTML = 'Aucune réservation pour cette date.'; return; }
       const ul = document.createElement('ul');
       ul.className = 'booking-list';
       items.forEach(it=>{
         const li = document.createElement('li');
         li.className = 'booking-list-item';
-        const start = it.startHour ?? (it.start ? new Date(it.start).getHours() : 0);
-        const hours = it.hours ?? Math.max(1, Math.round((new Date(it.end)-new Date(it.start))/3600000));
+        const start = it.startHour != null ? it.startHour : (it.start ? new Date(it.start).getHours() : 0);
+        const hours = it.hours != null ? it.hours : Math.max(1, Math.round((new Date(it.end)-new Date(it.start))/3600000));
         li.innerHTML = `<div><strong>${String(start).padStart(2,'0')}:00</strong> <span class="text-muted">pendant ${hours}h</span><div class="small text-muted">${it.date || ''} - ${it.ownerName || it.status || ''}</div></div>`;
         if (it.status === 'Booked') {
           const btn = document.createElement('button');
           btn.textContent = 'Annuler';
           btn.className = 'btn btn-sm btn-outline-danger ms-2';
           btn.addEventListener('click', async () => {
-            if (!confirm(`Annuler la reservation du ${it.date} a ${start}:00 ?`)) return;
+            if (!confirm(`Annuler la réservation du ${it.date} à ${start}:00 ?`)) return;
             const r = await fetch(`/api/reservations/${it.id}`, { method: 'DELETE', credentials: 'include' });
             if (r.ok || r.status === 204) { await fetchBookedSlots(); await renderWeek(); }
-            else { const j = await r.json().catch(()=>null); alert(j?.error || 'Annulation impossible'); }
+            else { const j = await r.json().catch(()=>null); alert((j && j.error) || 'Annulation impossible'); }
           });
           li.appendChild(btn);
         }
@@ -228,7 +262,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return el;
     }
 
-    dateInput.value = new Date().toISOString().slice(0,10);
+    dateInput.value = isoDate(new Date());
     startInput.value = '9'; hoursInput.value = '1';
 
     // week navigation state
@@ -260,15 +294,15 @@ document.addEventListener('DOMContentLoaded', () => {
       const lbl = document.getElementById('weekLabel');
       grid.innerHTML = 'Chargement...';
       const sp = parseInt(spaceSel.value,10);
-      if (!sp) { grid.innerHTML = 'Aucun espace selectionne'; lbl.textContent = ''; return; }
+      if (!sp) { grid.innerHTML = 'Aucun espace sélectionné'; lbl.textContent = ''; return; }
       const room = rooms.find(r=>r.id == sp) || { capacity: 1 };
       // build days
       const days = [];
       for (let i=0;i<7;i++){ days.push(addDays(weekStart,i)); }
-      lbl.textContent = `Semaine du ${days[0].toLocaleDateString('fr-FR')} au ${days[6].toLocaleDateString('fr-FR')}`;
+      lbl.textContent = `Semaine du ${localDate(days[0])} au ${localDate(days[6])}`;
 
       // fetch bookings for each day in parallel
-      const promises = days.map(d => fetch(`/api/reservations/space?spaceId=${sp}&date=${d.toISOString().slice(0,10)}`, { credentials: 'include' }).then(r=> r.ok? r.json(): []));
+      const promises = days.map(d => fetch(`/api/reservations/space?spaceId=${sp}&date=${isoDate(d)}`, { credentials: 'include' }).then(r=> r.ok? r.json(): []));
       const results = await Promise.all(promises);
 
       grid.innerHTML = '';
@@ -282,16 +316,16 @@ document.addEventListener('DOMContentLoaded', () => {
       const tbody = document.createElement('tbody');
       const selectSlot = (cell, day, hour, isFull) => {
         if (isFull) {
-          document.getElementById('bookingMsg').textContent = `Creneau complet : ${day.toISOString().slice(0,10)} ${hour}:00`;
+          setMessage(`Créneau complet : ${isoDate(day)} à ${hour}:00`, 'warning');
           return;
         }
         grid.querySelectorAll('.slot-cell.is-selected').forEach(x => x.classList.remove('is-selected'));
         cell.classList.add('is-selected');
-        dateInput.value = day.toISOString().slice(0,10);
+        dateInput.value = isoDate(day);
         startInput.value = String(hour);
         hoursInput.value = '1';
         updatePricePreview();
-        document.getElementById('bookingMsg').textContent = `Creneau selectionne : ${dateInput.value} ${hour}:00`;
+        setMessage(`Créneau sélectionné : ${dateInput.value} à ${hour}:00`, 'info');
       };
       // show hours from 7:00 to 21:00 only
       for (let h=7; h<=21; h++){
@@ -302,8 +336,8 @@ document.addEventListener('DOMContentLoaded', () => {
           const dayBookings = results[di] || [];
           // bookings that cover this hour
           const bookingsAtHour = dayBookings.filter(b=>{
-            const s = b.startHour ?? (b.start? new Date(b.start).getHours():0);
-            const hrs = b.hours ?? Math.max(1, Math.round((b.end && b.start) ? (new Date(b.end)-new Date(b.start))/3600000 : 1));
+            const s = b.startHour != null ? b.startHour : (b.start ? new Date(b.start).getHours() : 0);
+            const hrs = b.hours != null ? b.hours : Math.max(1, Math.round((b.end && b.start) ? (new Date(b.end)-new Date(b.start))/3600000 : 1));
             return (h >= s) && (h < s+hrs) && (b.status === 'Booked');
           });
           const count = bookingsAtHour.length;
@@ -355,7 +389,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const form = document.querySelector('#bookingContainer') || container;
         (form || container).appendChild(legend);
       }
-      legend.innerHTML = `<div class="calendar-legend"><span><i class="legend-dot free"></i>Libre</span><span><i class="legend-dot partial"></i>Partiel</span><span><i class="legend-dot full"></i>Complet (capacite ${capacity})</span></div>`;
+      legend.innerHTML = `<div class="calendar-legend"><span><i class="legend-dot free"></i>Libre</span><span><i class="legend-dot partial"></i>Partiel</span><span><i class="legend-dot full"></i>Complet (capacité ${capacity})</span></div>`;
     }
 
     function initFullCalendar(target){
@@ -381,11 +415,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // add a custom button to open the Booking page for the current space/date
         customButtons: {
           openBooking: {
-            text: 'Ouvrir reservation',
+            text: 'Ouvrir réservation',
             click: function(){
               try {
                 const sp = parseInt(spaceSel.value,10) || '';
-                const d = (calendar && calendar.getDate) ? calendar.getDate().toISOString().slice(0,10) : (new Date().toISOString().slice(0,10));
+                const d = (calendar && calendar.getDate) ? isoDate(calendar.getDate()) : isoDate(new Date());
                 const start = 9;
                 window.location.href = `/Booking?spaceId=${encodeURIComponent(sp)}&date=${encodeURIComponent(d)}&start=${encodeURIComponent(start)}`;
               } catch(e){ console.warn('openBooking failed', e); }
@@ -407,7 +441,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const palette = ['#7c3aed','#06b6d4','#f97316','#ef4444','#10b981','#f59e0b','#6366f1'];
             // iterate days in range
             for (let d = new Date(start); d < end; d.setDate(d.getDate()+1)){
-              const day = d.toISOString().slice(0,10);
+              const day = isoDate(d);
               const res = await fetch(`/api/reservations/space?spaceId=${sp}&date=${day}`, { credentials: 'include' });
               if (!res.ok) continue;
               const items = await res.json();
@@ -426,7 +460,7 @@ document.addEventListener('DOMContentLoaded', () => {
           // user dragged a time range -> either prefill form or navigate to Booking page
           const start = selectInfo.start; // Date
           const end = selectInfo.end;
-          const date = start.toISOString().slice(0,10);
+          const date = isoDate(start);
           const hour = start.getUTCHours();
           const hours = Math.max(1, Math.round((end - start) / 3600000));
           // if this calendar is the modal preview, navigate to the Booking page
@@ -439,14 +473,14 @@ document.addEventListener('DOMContentLoaded', () => {
           dateInput.value = date;
           startInput.value = String(hour);
           hoursInput.value = String(hours);
-          document.getElementById('bookingMsg').textContent = `Creneau selectionne : ${date} ${hour}:00 (${hours}h)`;
+          setMessage(`Créneau sélectionné : ${date} à ${hour}:00 (${hours}h)`, 'info');
           calendar.unselect();
         },
         eventClick: function(info){
           // clicking an event fills the booking inputs for editing/replicating
           const p = info.event.extendedProps || {};
           const s = info.event.start;
-          const date = s.toISOString().slice(0,10);
+          const date = isoDate(s);
           const hour = s.getUTCHours();
           const hours = Math.max(1, Math.round((info.event.end - s)/3600000));
           // if in modal preview navigate to Booking page for this time
@@ -458,14 +492,14 @@ document.addEventListener('DOMContentLoaded', () => {
           dateInput.value = date;
           startInput.value = String(hour);
           hoursInput.value = String(hours);
-          document.getElementById('bookingMsg').textContent = `Reservation selectionnee : ${info.event.title}`;
+          setMessage(`Réservation sélectionnée : ${info.event.title}`, 'info');
         },
         eventDidMount: function(info){
           // attach bootstrap popover with richer details
           const props = info.event.extendedProps || {};
           const owner = props.ownerName || 'Inconnu';
           const status = props.status || 'Booked';
-          const total = props.total ?? props.Total_Amount ?? '';
+          const total = props.total != null ? props.total : (props.Total_Amount != null ? props.Total_Amount : '');
           const t = `<div style="min-width:200px"><strong>${info.event.title}</strong><div class=\"text-muted small\">${status}</div><div style=\"margin-top:6px\">${new Date(info.event.start).toLocaleString()} - ${new Date(info.event.end).toLocaleString()}</div><div class=\"mt-2 small\"><strong>Client:</strong> ${owner}</div><div class=\"small\"><strong>Montant:</strong> ${total}</div></div>`;
           // use popper-based bootstrap popover
           new bootstrap.Popover(info.el, { content: t, html: true, trigger: 'hover', placement: 'auto' });
@@ -503,7 +537,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <div class="text-muted small">${it.date} - ${String(it.startHour).padStart(2,'0')}:00 (${it.hours}h)</div>
           </div>
           <div class="d-flex align-items-center gap-2">
-                <span class="text-muted small">${(it.totalTtc).toFixed(2)} EUR</span>
+                <span class="text-muted small">${euro(it.totalTtc)}</span>
             <button class="btn btn-sm btn-link text-danger p-0" data-idx="${i}"><i class="bi bi-x-circle"></i></button>
           </div>`;
         li.querySelector('button').addEventListener('click', () => {
@@ -512,13 +546,14 @@ document.addEventListener('DOMContentLoaded', () => {
         cartList.appendChild(li);
         total += it.totalTtc;
       }
-      cartTotal.textContent = total.toFixed(2) + ' EUR';
+      cartTotal.textContent = euro(total);
     }
 
-    document.getElementById('cartBtn')?.addEventListener('click', () => {
+    const cartBtn = document.getElementById('cartBtn');
+    if (cartBtn) cartBtn.addEventListener('click', () => {
       const sp = rooms.find(r => String(r.id) === String(spaceSel.value));
       const validationError = validateSelection();
-      if (validationError) { msg.style.color = 'red'; msg.textContent = validationError; return; }
+      if (validationError) { setMessage(validationError, 'danger'); return; }
       if (!sp) { alert('Choisissez un espace.'); return; }
       const hours = Math.max(1, parseInt(hoursInput.value, 10) || 1);
       const item = {
@@ -530,12 +565,14 @@ document.addEventListener('DOMContentLoaded', () => {
         totalTtc: +(sp.pricePerHour * hours * 1.20).toFixed(2)
       };
       const arr = readCart(); arr.push(item); writeCart(arr);
-      msg.style.color = 'green'; msg.textContent = `Ajoute au panier (${arr.length})`;
+      setMessage(`Ajouté au panier (${arr.length})`, 'success');
     });
 
-    document.getElementById('cartClear')?.addEventListener('click', () => writeCart([]));
+    const cartClear = document.getElementById('cartClear');
+    if (cartClear) cartClear.addEventListener('click', () => writeCart([]));
 
-    document.getElementById('checkoutBtn')?.addEventListener('click', async () => {
+    const checkoutBtn = document.getElementById('checkoutBtn');
+    if (checkoutBtn) checkoutBtn.addEventListener('click', async () => {
       const items = readCart();
       if (!items.length) return;
       const res = await fetch('/api/cart/checkout', {
@@ -545,15 +582,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (res.ok){
         const data = await res.json();
         writeCart([]);
-        msg.style.color = 'green';
-        msg.innerHTML = `Panier valide - Facture ${data.invoiceNumber} (${data.totalTtc.toFixed(2)} EUR) <a href="/MyReservations" class="ms-2">Mes reservations</a>`;
+        setMessage(`Panier validé - Facture ${data.invoiceNumber} (${euro(data.totalTtc)}) <a href="/MyReservations" class="ms-2">Mes réservations</a>`, 'success', true);
         await fetchBookedSlots(); renderWeek();
       } else if (res.status === 409) {
         const j = await res.json().catch(()=>null);
-        msg.style.color = 'red'; msg.textContent = j?.error || 'Conflit de reservation';
+        setMessage((j && j.error) || 'Conflit de réservation', 'danger');
       } else {
         const j = await res.json().catch(()=>null);
-        msg.style.color = 'red'; msg.textContent = j?.error || 'Validation impossible';
+        setMessage((j && j.error) || 'Validation impossible', 'danger');
       }
     });
 

@@ -40,14 +40,12 @@ function renderMap(spaces){
     if(s.capacity && s.capacity < 2) rect.classList.add('small-room');
     rect.addEventListener('click', (e)=>{
       e.stopPropagation();
-      console.log('[map] rect click', s.id);
       // dispatch an event so booking.js can react even if script load order differs
       try { document.dispatchEvent(new CustomEvent('space:selected', { detail: { id: s.id } })); } catch (e) { console.warn('[map] dispatch space:selected failed', e); }
       // Prefer calling the booking API directly to avoid issues if selectSpace is
       // shadowed or otherwise not executing as expected in some environments.
       if (window.showBookingForSpace) {
         try {
-          console.log('[map] calling showBookingForSpace');
           window.showBookingForSpace(s.id);
           // if booking panel remains hidden (race or CSS), show a simple overlay fallback
           setTimeout(()=>{
@@ -89,7 +87,7 @@ function renderMap(spaces){
       try { selectSpace(s.id); } catch (e) { console.error('[map] selectSpace failed', e); }
     });
     const title = document.createElementNS(svgNS,'title');
-      title.textContent = `${s.name} - capacite ${s.capacity}`;
+      title.textContent = `${s.name} - capacité ${s.capacity}`;
     rect.appendChild(title);
     svg.appendChild(rect);
     rect.setAttribute('data-space-id', s.id);
@@ -106,7 +104,7 @@ function renderMap(spaces){
     cap.setAttribute('x', x + 12);
     cap.setAttribute('y', y + 48);
     cap.setAttribute('class','space-cap');
-    cap.textContent = `Capacite: ${s.capacity}`;
+    cap.textContent = `Capacité : ${s.capacity}`;
     cap.setAttribute('pointer-events', 'none');
     svg.appendChild(cap);
   });
@@ -130,14 +128,13 @@ function selectSpace(id){
   const s = spaces.find(x=>x.id==id);
   const detail = document.getElementById('detailPanel');
   if(s && detail){
-    console.log('[map] selectSpace', s.id);
     // show only basic info and a link to the booking panel. Detailed week calendar
     // is hidden by default on the map page and will be revealed when a room is clicked.
     detail.innerHTML = `
-      <div class="mb-2"><strong>${s.name}</strong><div class="text-muted small">Capacite: ${s.capacity}</div></div>
+      <div class="mb-2"><strong>${s.name}</strong><div class="text-muted small">Capacité : ${s.capacity}</div></div>
       <div class="d-flex gap-2 mt-2">
         <button id="previewCalendarBtn" class="btn btn-sm btn-outline-primary">Voir calendrier</button>
-        <a href="/Booking?spaceId=${encodeURIComponent(s.id)}" class="btn btn-sm btn-primary">Reserver</a>
+        <a href="/Booking?spaceId=${encodeURIComponent(s.id)}" class="btn btn-sm btn-primary">Réserver</a>
       </div>
     `;
     // wire preview button
@@ -155,7 +152,6 @@ function selectSpace(id){
     // Open booking UI in a Bootstrap modal so it's always visible to the user.
     const bookingPanel = document.getElementById('bookingContainer');
     if (bookingPanel) {
-      console.log('[map] bookingPanel exists, preparing modal');
       try {
         // remove any pre-existing modal instance
         const prev = document.getElementById('mapBookingModal');
@@ -170,7 +166,7 @@ function selectSpace(id){
           <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content">
               <div class="modal-header">
-          <h5 class="modal-title">Reservation - ${s.name}</h5>
+          <h5 class="modal-title">Réservation - ${s.name}</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
               </div>
               <div class="modal-body" id="mapBookingModalBody"></div>
@@ -199,20 +195,17 @@ function selectSpace(id){
         bookingPanel.style.setProperty('display','block','important');
 
         // initialize booking UI for the selected space
-        console.log('[map] invoking showBookingForSpace?', !!window.showBookingForSpace);
         if (window.showBookingForSpace) {
           try { window.showBookingForSpace(s.id); } catch (e) { console.warn('showBookingForSpace failed', e); }
         }
 
         // initialize the full calendar inside the modal (on-demand)
-        console.log('[map] initFullCalendar available?', !!window.initFullCalendar);
         if (window.initFullCalendar) {
           try { window.initFullCalendar('fullCalendarModal'); } catch (e) { console.warn('initFullCalendar failed', e); }
         }
 
         // show modal via Bootstrap
         if (window.bootstrap && typeof bootstrap.Modal === 'function') {
-          console.log('[map] showing bootstrap modal');
           const bsModal = new bootstrap.Modal(modal);
           bsModal.show();
         } else {
@@ -246,10 +239,9 @@ async function renderSpaceWeek(spaceId, capacity){
   const lbl = document.getElementById('mapWeekLabel');
   if(!grid) return;
   grid.innerHTML = 'Chargement...';
-  console.log('renderSpaceWeek', { spaceId, capacity, mapWeekStart });
   const days = [];
   for(let i=0;i<7;i++) days.push(addDays(mapWeekStart,i));
-  lbl.textContent = `${days[0].toISOString().slice(0,10)} a ${days[6].toISOString().slice(0,10)}`;
+  lbl.textContent = `${days[0].toISOString().slice(0,10)} à ${days[6].toISOString().slice(0,10)}`;
 
   // fetch reservations per day
   const promises = days.map(d => fetch(`/api/reservations/space?spaceId=${spaceId}&date=${d.toISOString().slice(0,10)}`, { credentials: 'include' })
@@ -287,8 +279,8 @@ async function renderSpaceWeek(spaceId, capacity){
       const cell = document.createElement('td');
       const dayBookings = results[di] || [];
       const bookingsAtHour = dayBookings.filter(b=>{
-        const s = b.startHour ?? (b.start? new Date(b.start).getHours():0);
-        const hrs = b.hours ?? Math.max(1, Math.round((b.end && b.start) ? (new Date(b.end)-new Date(b.start))/3600000 : 1));
+        const s = b.startHour != null ? b.startHour : (b.start ? new Date(b.start).getHours() : 0);
+        const hrs = b.hours != null ? b.hours : Math.max(1, Math.round((b.end && b.start) ? (new Date(b.end)-new Date(b.start))/3600000 : 1));
         return (h >= s) && (h < s+hrs) && (b.status === 'Booked');
       });
       const count = bookingsAtHour.length;
@@ -334,7 +326,7 @@ function renderList(spaces){
     li.textContent = `${s.name} (cap. ${s.capacity})`;
     li.dataset.spaceId = s.id;
     li.dataset.name = s.name;
-    li.addEventListener('mouseenter', ()=>{ const r = document.querySelector(`.space-rect[data-space-id='${s.id}']`); if(r) r.classList.add('selected'); const detail = document.getElementById('detailPanel'); if(detail) detail.innerHTML = `<strong>${s.name}</strong><div>Capacite: ${s.capacity}</div>`; });
+    li.addEventListener('mouseenter', ()=>{ const r = document.querySelector(`.space-rect[data-space-id='${s.id}']`); if(r) r.classList.add('selected'); const detail = document.getElementById('detailPanel'); if(detail) detail.innerHTML = `<strong>${s.name}</strong><div>Capacité : ${s.capacity}</div>`; });
     li.addEventListener('mouseleave', ()=>{ clearSelection(); });
     li.addEventListener('click', ()=> selectSpace(s.id));
     ul.appendChild(li);

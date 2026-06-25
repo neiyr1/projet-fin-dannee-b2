@@ -5,12 +5,12 @@
     <img src="~/images/Logo_1_mini.svg" asp-append-version="true" alt="Logo" style="height:36px" />
     <div>
       <h1 class="h4 mb-0">Plan des espaces</h1>
-      <div class="text-muted small">Visualisation rapide des salles et acces a la reservation.</div>
+      <div class="text-muted small">Visualisation rapide des salles et accès à la réservation.</div>
     </div>
   </div>
   <div class="d-flex gap-2">
     <input id="search" placeholder="Rechercher un espace" class="form-control form-control-sm" style="min-width:200px" />
-    <button id="refresh" class="btn btn-sm btn-outline-secondary">Actualiser</button>
+    <button id="refresh" class="btn btn-sm btn-outline-secondary" title="Actualiser"><i class="bi bi-arrow-clockwise"></i></button>
   </div>
   <div id="count" class="text-muted small"></div>
 </div>
@@ -30,7 +30,7 @@
     <div id="detailPanel" class="detail-panel mt-2"></div>
     <div class="card mt-3">
       <div class="card-body">
-        <h6>Calendrier de reservation</h6>
+        <h6>Calendrier de réservation</h6>
         <div id="bookingContainer" style="display:none">
           <div class="row g-2 mb-2">
             <div class="col-auto">
@@ -46,11 +46,11 @@
               <input id="hoursInput" type="number" class="form-control form-control-sm" style="width:80px" />
             </div>
             <div class="col-auto">
-              <button id="bookBtn" class="btn btn-sm btn-primary">Reserver</button>
+              <button id="bookBtn" class="btn btn-sm btn-primary">Réserver</button>
             </div>
             <div class="col-auto"><div id="bookingMsg" class="small text-muted"></div></div>
           </div>
-          <div id="weekControls" class="mb-2 d-flex gap-2 align-items-center"><button id="prevWeek" class="btn btn-sm btn-outline-secondary">&lt;</button><button id="todayBtn" class="btn btn-sm btn-outline-primary">Aujourd'hui</button><div id="weekLabel" class="fw-bold"></div><button id="nextWeek" class="btn btn-sm btn-outline-secondary">&gt;</button></div>
+          <div id="weekControls" class="mb-2 d-flex gap-2 align-items-center"><button id="prevWeek" class="btn btn-sm btn-outline-secondary"><i class="bi bi-chevron-left"></i></button><button id="todayBtn" class="btn btn-sm btn-outline-primary">Aujourd'hui</button><div id="weekLabel" class="fw-bold"></div><button id="nextWeek" class="btn btn-sm btn-outline-secondary"><i class="bi bi-chevron-right"></i></button></div>
           <div id="weekView" style="overflow:auto"></div>
         </div>
       </div>
