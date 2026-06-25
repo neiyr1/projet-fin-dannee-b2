@@ -112,6 +112,58 @@ static IResult ActiveDirectoryErrorResult(ActiveDirectoryOperationException ex)
     };
 }
 
+static ActiveDirectoryUserLink ProvisionAdAccountOrThrow(ActiveDirectoryService adService, string name, string email, string password)
+{
+    if (!adService.IsEnabled) return ActiveDirectoryUserLink.Disabled;
+    return adService.CreateUser(name, email, password);
+}
+
+static void SaveAdLink(Microsoft.Data.Sqlite.SqliteConnection conn, int userId, ActiveDirectoryUserLink adLink, bool clearLocalPassword)
+{
+    if (!adLink.Created) return;
+    using var upd = conn.CreateCommand();
+    upd.CommandText = @"UPDATE Users
+                        SET ADSamAccountName = $sam,
+                            ADUserPrincipalName = $upn,
+                            ADObjectGuid = $guid,
+                            PasswordHash = CASE WHEN $clear = 1 THEN NULL ELSE PasswordHash END
+                        WHERE Id = $id";
+    upd.Parameters.AddWithValue("$sam", (object?)adLink.SamAccountName ?? DBNull.Value);
+    upd.Parameters.AddWithValue("$upn", (object?)adLink.UserPrincipalName ?? DBNull.Value);
+    upd.Parameters.AddWithValue("$guid", (object?)adLink.ObjectGuid ?? DBNull.Value);
+    upd.Parameters.AddWithValue("$clear", clearLocalPassword ? 1 : 0);
+    upd.Parameters.AddWithValue("$id", userId);
+    upd.ExecuteNonQuery();
+}
+
+static IResult? EnsureAdLinkedForBooking(HttpContext http, Microsoft.Data.Sqlite.SqliteConnection conn, ActiveDirectoryService adService)
+{
+    if (!adService.IsEnabled) return null;
+    if (http.User.IsInRole("Admin")) return null;
+
+    var idClaim = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    using var cmd = conn.CreateCommand();
+    if (int.TryParse(idClaim, out var userId))
+    {
+        cmd.CommandText = "SELECT ADSamAccountName, ADUserPrincipalName FROM Users WHERE Id = $id";
+        cmd.Parameters.AddWithValue("$id", userId);
+    }
+    else
+    {
+        var name = http.User?.Identity?.Name ?? string.Empty;
+        cmd.CommandText = "SELECT ADSamAccountName, ADUserPrincipalName FROM Users WHERE Name = $n OR Email = $n LIMIT 1";
+        cmd.Parameters.AddWithValue("$n", name);
+    }
+
+    using var rdr = cmd.ExecuteReader();
+    if (!rdr.Read()) return Results.Unauthorized();
+    var sam = rdr.IsDBNull(0) ? null : rdr.GetString(0);
+    var upn = rdr.IsDBNull(1) ? null : rdr.GetString(1);
+    if (!string.IsNullOrWhiteSpace(sam) || !string.IsNullOrWhiteSpace(upn)) return null;
+
+    return Results.Json(new { error = "Compte Active Directory manquant. Deconnectez-vous puis reconnectez-vous pour creer le compte AD avant de reserver." }, statusCode: StatusCodes.Status409Conflict);
+}
+
 var dbPath = GetDbPath();
 DbHelpers.InitializeDatabase(dbPath);
 DbHelpers.SeedAdminUser(dbPath);
@@ -172,6 +224,26 @@ app.MapPost("/api/login", async (HttpContext http, ActiveDirectoryService adServ
 
             if (!string.IsNullOrEmpty(ph) && DbHelpers.VerifyPassword(password, ph))
             {
+                if (adService.IsEnabled && !isAdLinked && !string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (string.IsNullOrWhiteSpace(email))
+                        return Results.BadRequest(new { error = "Email requis pour creer le compte Active Directory." });
+
+                    try
+                    {
+                        var adLink = ProvisionAdAccountOrThrow(adService, name, email, password);
+                        SaveAdLink(conn, id, adLink, clearLocalPassword: true);
+                        adSam = adLink.SamAccountName;
+                        adUpn = adLink.UserPrincipalName;
+                        adGuid = adLink.ObjectGuid;
+                    }
+                    catch (ActiveDirectoryOperationException ex)
+                    {
+                        logger.LogWarning(ex, "Active Directory provisioning on login failed for {Username}", username);
+                        return ActiveDirectoryErrorResult(ex);
+                    }
+                }
+
                 var identity = new ClaimsIdentity(BuildAuthClaims(id, name, role ?? "", email, adGuid), CookieAuthenticationDefaults.AuthenticationScheme);
                 await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
                 return Results.Ok(new { user = name });
@@ -196,7 +268,7 @@ app.MapGet("/api/me", (ClaimsPrincipal user) =>
     return Results.Ok(new { user = user.Identity?.Name, role });
 });
 
-app.MapPost("/api/signup", async (HttpContext http, EmailService emailSvc, ILogger<Program> logger) =>
+app.MapPost("/api/signup", async (HttpContext http, EmailService emailSvc, ActiveDirectoryService adService, ILogger<Program> logger) =>
 {
     var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(http.Request.Body);
     if (body == null) return Results.BadRequest(new { error = "Invalid payload" });
@@ -224,17 +296,33 @@ app.MapPost("/api/signup", async (HttpContext http, EmailService emailSvc, ILogg
             return Results.Conflict(new { error = "Email already registered" });
     }
 
+    ActiveDirectoryUserLink adLink;
+    try
+    {
+        adLink = ProvisionAdAccountOrThrow(adService, name, email, password);
+    }
+    catch (ActiveDirectoryOperationException ex)
+    {
+        logger.LogWarning(ex, "Active Directory provisioning failed during signup for {Email}", email);
+        return ActiveDirectoryErrorResult(ex);
+    }
+
     var verifyToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
     using var ins = conn.CreateCommand();
-    ins.CommandText = "INSERT INTO Users (Name, Email, Role, PasswordHash, EmailVerified, EmailVerifyToken) VALUES ($n,$e,$r,$ph,0,$tok); SELECT last_insert_rowid();";
+    ins.CommandText = @"INSERT INTO Users (Name, Email, Role, PasswordHash, EmailVerified, EmailVerifyToken, ADSamAccountName, ADUserPrincipalName, ADObjectGuid)
+                        VALUES ($n,$e,$r,$ph,0,$tok,$sam,$upn,$guid);
+                        SELECT last_insert_rowid();";
     ins.Parameters.AddWithValue("$n", name);
     ins.Parameters.AddWithValue("$e", email);
     ins.Parameters.AddWithValue("$r", "User");
-    ins.Parameters.AddWithValue("$ph", DbHelpers.CreatePasswordHash(password));
+    ins.Parameters.AddWithValue("$ph", adLink.Created ? DBNull.Value : DbHelpers.CreatePasswordHash(password));
     ins.Parameters.AddWithValue("$tok", verifyToken);
+    ins.Parameters.AddWithValue("$sam", (object?)adLink.SamAccountName ?? DBNull.Value);
+    ins.Parameters.AddWithValue("$upn", (object?)adLink.UserPrincipalName ?? DBNull.Value);
+    ins.Parameters.AddWithValue("$guid", (object?)adLink.ObjectGuid ?? DBNull.Value);
     var id = Convert.ToInt32(ins.ExecuteScalar() ?? 0);
 
-    var claims = BuildAuthClaims(id, name, "User", email);
+    var claims = BuildAuthClaims(id, name, "User", email, adLink.ObjectGuid);
     var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
     await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
 
@@ -242,7 +330,12 @@ app.MapPost("/api/signup", async (HttpContext http, EmailService emailSvc, ILogg
     try { await emailSvc.SendWelcomeAsync(email, name, verifyUrl); }
     catch (Exception ex) { logger.LogWarning(ex, "Welcome email failed for {Email}", email); }
 
-    return Results.Created($"/api/users/{id}", new { id, name, email, role = "User" });
+    return Results.Created($"/api/users/{id}", new {
+        id, name, email, role = "User",
+        adSamAccountName = adLink.SamAccountName,
+        adUserPrincipalName = adLink.UserPrincipalName,
+        adObjectGuid = adLink.ObjectGuid
+    });
 });
 
 app.MapGet("/api/verify-email", (string? token) =>
@@ -755,7 +848,7 @@ app.MapDelete("/api/resources/{id:int}", (HttpContext http, int id) =>
 
 // --- Reservation endpoints ---
 
-app.MapPost("/api/reservations", async (HttpContext http, InvoiceService invoiceSvc, EmailService emailSvc) =>
+app.MapPost("/api/reservations", async (HttpContext http, InvoiceService invoiceSvc, EmailService emailSvc, ActiveDirectoryService adService) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
 
@@ -791,6 +884,8 @@ app.MapPost("/api/reservations", async (HttpContext http, InvoiceService invoice
     var end = start.AddHours(hours);
 
     using var conn = DbHelpers.OpenConnection(GetDbPath());
+    var adCheck = EnsureAdLinkedForBooking(http, conn, adService);
+    if (adCheck != null) return adCheck;
 
     // Lookup space + price + capacity
     double pricePerHour = 0;
@@ -1102,7 +1197,7 @@ app.MapPut("/api/reservations/{id:int}", async (HttpContext http, int id, EmailS
 
 // --- Cart checkout (multi-item booking) ---
 
-app.MapPost("/api/cart/checkout", async (HttpContext http, InvoiceService invoiceSvc, EmailService emailSvc) =>
+app.MapPost("/api/cart/checkout", async (HttpContext http, InvoiceService invoiceSvc, EmailService emailSvc, ActiveDirectoryService adService) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
     System.Text.Json.JsonElement root;
@@ -1112,6 +1207,8 @@ app.MapPost("/api/cart/checkout", async (HttpContext http, InvoiceService invoic
         return Results.BadRequest(new { error = "Cart is empty" });
 
     using var conn = DbHelpers.OpenConnection(GetDbPath());
+    var adCheck = EnsureAdLinkedForBooking(http, conn, adService);
+    if (adCheck != null) return adCheck;
 
     var currentName = http.User?.Identity?.Name ?? string.Empty;
     int ownerId;

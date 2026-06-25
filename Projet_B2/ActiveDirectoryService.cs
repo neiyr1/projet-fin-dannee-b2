@@ -36,17 +36,14 @@ public sealed class ActiveDirectoryService
 
         try
         {
-            using var user = new UserPrincipal(createContext)
+            using var user = new UserPrincipal(createContext, sam, initialPassword, true)
             {
-                SamAccountName = sam,
                 UserPrincipalName = upn,
                 Name = displayName,
                 DisplayName = displayName,
-                EmailAddress = email,
-                Enabled = true
+                EmailAddress = email
             };
 
-            user.SetPassword(initialPassword);
             user.Save();
 
             var guid = user.Guid?.ToString("D") ?? string.Empty;
