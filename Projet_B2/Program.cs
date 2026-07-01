@@ -478,6 +478,11 @@ app.MapPost("/api/users", async (HttpContext http, ActiveDirectoryService adServ
     {
         adLink = adService.CreateUser(name, email, password);
     }
+    catch (ActiveDirectoryOperationException ex) when (ex.Kind == ActiveDirectoryErrorKind.Unavailable)
+    {
+        logger.LogWarning(ex, "Active Directory provisioning failed for {Email}, falling back to local account", email);
+        adLink = ActiveDirectoryUserLink.Disabled;
+    }
     catch (ActiveDirectoryOperationException ex)
     {
         logger.LogWarning(ex, "Active Directory provisioning failed for {Email}", email);

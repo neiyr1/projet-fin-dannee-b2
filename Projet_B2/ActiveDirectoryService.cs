@@ -84,17 +84,18 @@ public sealed class ActiveDirectoryService
     {
         EnsureWindowsForAccountManagement();
 
-        using var createContext = CreateUserContainerContext(settings);
-        using var searchContext = CreateDomainContext(settings, useServiceAccount: true);
-
         var upn = BuildUserPrincipalName(settings, email);
-        if (FindUser(searchContext, IdentityType.UserPrincipalName, upn) != null)
-            throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Duplicate, $"Un compte AD existe deja pour {upn}.");
-
-        var sam = FindAvailableSamAccountName(searchContext, BuildSamBase(displayName, email));
 
         try
         {
+            using var createContext = CreateUserContainerContext(settings);
+            using var searchContext = CreateDomainContext(settings, useServiceAccount: true);
+
+            if (FindUser(searchContext, IdentityType.UserPrincipalName, upn) != null)
+                throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Duplicate, $"Un compte AD existe deja pour {upn}.");
+
+            var sam = FindAvailableSamAccountName(searchContext, BuildSamBase(displayName, email));
+
             using var user = new UserPrincipal(createContext, sam, initialPassword, true)
             {
                 UserPrincipalName = upn,
@@ -110,6 +111,10 @@ public sealed class ActiveDirectoryService
                 throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Unavailable, "Le GUID AD n'a pas ete retourne apres creation.");
 
             return new ActiveDirectoryUserLink(sam, upn, guid, true);
+        }
+        catch (ActiveDirectoryOperationException)
+        {
+            throw;
         }
         catch (PasswordException ex)
         {
@@ -130,41 +135,58 @@ public sealed class ActiveDirectoryService
     {
         EnsureWindowsForAccountManagement();
 
-        using var context = CreateDomainContext(settings, useServiceAccount: false);
         var candidates = BuildLoginCandidates(login, samAccountName, userPrincipalName, settings.NetBiosName).ToArray();
 
-        foreach (var candidate in candidates)
+        try
         {
-            try
-            {
-                if (context.ValidateCredentials(candidate, password, ContextOptions.Negotiate))
-                    return true;
-            }
-            catch (PrincipalException ex)
-            {
-                _logger.LogWarning(ex, "Active Directory credential validation failed for {Candidate}", candidate);
-                throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Unavailable, "Validation Active Directory indisponible.", ex);
-            }
-        }
+            using var context = CreateDomainContext(settings, useServiceAccount: false);
 
-        return false;
+            foreach (var candidate in candidates)
+            {
+                try
+                {
+                    if (context.ValidateCredentials(candidate, password, ContextOptions.Negotiate))
+                        return true;
+                }
+                catch (PrincipalException ex)
+                {
+                    _logger.LogWarning(ex, "Active Directory credential validation failed for {Candidate}", candidate);
+                    throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Unavailable, "Validation Active Directory indisponible.", ex);
+                }
+            }
+
+            return false;
+        }
+        catch (ActiveDirectoryOperationException)
+        {
+            throw;
+        }
+        catch (PrincipalException ex)
+        {
+            _logger.LogWarning(ex, "Active Directory context creation failed");
+            throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Unavailable, "Validation Active Directory indisponible.", ex);
+        }
     }
 
     private void SetPasswordWithAccountManagement(ActiveDirectorySettings settings, string samAccountName, string? userPrincipalName, string newPassword)
     {
         EnsureWindowsForAccountManagement();
 
-        using var context = CreateDomainContext(settings, useServiceAccount: true);
-        using var user = FindUser(context, IdentityType.SamAccountName, samAccountName)
-            ?? (!string.IsNullOrWhiteSpace(userPrincipalName) ? FindUser(context, IdentityType.UserPrincipalName, userPrincipalName) : null);
-
-        if (user == null)
-            throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.NotFound, "Compte Active Directory introuvable.");
-
         try
         {
+            using var context = CreateDomainContext(settings, useServiceAccount: true);
+            using var user = FindUser(context, IdentityType.SamAccountName, samAccountName)
+                ?? (!string.IsNullOrWhiteSpace(userPrincipalName) ? FindUser(context, IdentityType.UserPrincipalName, userPrincipalName) : null);
+
+            if (user == null)
+                throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.NotFound, "Compte Active Directory introuvable.");
+
             user.SetPassword(newPassword);
             user.Save();
+        }
+        catch (ActiveDirectoryOperationException)
+        {
+            throw;
         }
         catch (PasswordException ex)
         {
@@ -181,15 +203,15 @@ public sealed class ActiveDirectoryService
     {
         EnsureWindowsForAccountManagement();
 
-        using var context = CreateDomainContext(settings, useServiceAccount: true);
-        using var user = FindUser(context, IdentityType.SamAccountName, samAccountName)
-            ?? (!string.IsNullOrWhiteSpace(userPrincipalName) ? FindUser(context, IdentityType.UserPrincipalName, userPrincipalName) : null);
-
-        if (user == null)
-            throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.NotFound, "Compte Active Directory introuvable.");
-
         try
         {
+            using var context = CreateDomainContext(settings, useServiceAccount: true);
+            using var user = FindUser(context, IdentityType.SamAccountName, samAccountName)
+                ?? (!string.IsNullOrWhiteSpace(userPrincipalName) ? FindUser(context, IdentityType.UserPrincipalName, userPrincipalName) : null);
+
+            if (user == null)
+                throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.NotFound, "Compte Active Directory introuvable.");
+
             user.Enabled = enabled;
             user.Save();
 
@@ -197,6 +219,10 @@ public sealed class ActiveDirectoryService
                 ? settings.UsersContainerDistinguishedName
                 : settings.DisabledUsersContainerDistinguishedName;
             MoveUserToContainer(user, settings, targetContainer);
+        }
+        catch (ActiveDirectoryOperationException)
+        {
+            throw;
         }
         catch (PrincipalException ex)
         {
@@ -483,6 +509,11 @@ public sealed class ActiveDirectoryService
         var servicePasswordEnv = section["ServiceAccountPasswordEnvironmentVariable"] ?? "AD_SERVICE_PASSWORD";
         var serviceUser = ReadEnvironmentValue(serviceUserEnv).Trim();
         var servicePassword = ReadEnvironmentValue(servicePasswordEnv);
+
+        if (string.IsNullOrWhiteSpace(serviceUser))
+            serviceUser = (section["ServiceAccountUser"] ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(servicePassword))
+            servicePassword = (section["ServiceAccountPassword"] ?? string.Empty).Trim();
 
         if (string.IsNullOrWhiteSpace(domainDns))
             throw new ActiveDirectoryOperationException(ActiveDirectoryErrorKind.Configuration, "ActiveDirectory:DomainDnsName est requis.");

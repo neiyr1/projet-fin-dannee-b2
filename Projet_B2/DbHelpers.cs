@@ -168,8 +168,7 @@ CREATE TABLE IF NOT EXISTS Reminders (
             var hash = new byte[32];
             Buffer.BlockCopy(bytes, 1 + salt.Length, hash, 0, hash.Length);
 
-            var pbkdf2 = new Rfc2898DeriveBytes(password, salt, 100_000, HashAlgorithmName.SHA256);
-            var test = pbkdf2.GetBytes(32);
+            var test = Rfc2898DeriveBytes.Pbkdf2(password, salt, 100_000, HashAlgorithmName.SHA256, 32);
             return CryptographicOperations.FixedTimeEquals(test, hash);
         }
         catch { return false; }
@@ -205,8 +204,7 @@ CREATE TABLE IF NOT EXISTS Reminders (
     {
         var salt = new byte[16];
         using (var rng = RandomNumberGenerator.Create()) rng.GetBytes(salt);
-        var pbkdf2 = new Rfc2898DeriveBytes(password, salt, 100_000, HashAlgorithmName.SHA256);
-        var hash = pbkdf2.GetBytes(32);
+        var hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, 100_000, HashAlgorithmName.SHA256, 32);
         var outBytes = new byte[1 + salt.Length + hash.Length];
         outBytes[0] = 0; // version
         Buffer.BlockCopy(salt, 0, outBytes, 1, salt.Length);
