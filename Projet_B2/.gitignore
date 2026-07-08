@@ -63,6 +63,12 @@ Desktop.ini
 # Project-specific
 # ---------------------------------------------------------------------
 
+# Obsolete post-Postgres-migration, but ignore any leftover local file
+data/app.db
+data/app.db-journal
+data/app.db-shm
+data/app.db-wal
+
 # Generated PDFs and outbound emails
 data/invoices/
 data/outbox/
