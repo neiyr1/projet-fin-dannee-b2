@@ -63,15 +63,12 @@ Desktop.ini
 # Project-specific
 # ---------------------------------------------------------------------
 
-# Local SQLite database (data lives in users' env, do not version it)
-data/app.db
-data/app.db-journal
-data/app.db-shm
-data/app.db-wal
-
 # Generated PDFs and outbound emails
 data/invoices/
 data/outbox/
+
+# One-time generated admin password (see DbHelpers.SeedAdminUser)
+data/ADMIN_INITIAL_PASSWORD.txt
 
 # Local secrets / overrides
 appsettings.Development.json

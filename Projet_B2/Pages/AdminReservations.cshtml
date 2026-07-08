@@ -16,7 +16,7 @@
       <option value="Booked">Confirmée</option>
       <option value="Cancelled">Annulée</option>
     </select>
-    <button id="refresh" class="btn btn-outline-secondary btn-sm" title="Actualiser"><i class="bi bi-arrow-clockwise"></i></button>
+    <button id="refresh" class="btn btn-outline-secondary btn-sm" title="Actualiser" aria-label="Actualiser"><i class="bi bi-arrow-clockwise"></i></button>
     <button id="exportCsv" class="btn btn-outline-primary btn-sm" title="Exporter CSV"><i class="bi bi-filetype-csv me-1"></i>CSV</button>
   </div>
 </div>
@@ -49,6 +49,7 @@
 (function(){
   const tbody = document.getElementById('resBody');
   const fmtTime = h => `${String(h).padStart(2,'0')}:00`;
+  const esc = s => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   let currentItems = [];
 
   async function load(){
@@ -75,15 +76,15 @@
           ? '<span class="badge status-soft-muted">Annulée</span>'
           : '<span class="badge status-soft-success">Confirmée</span>';
         const invoice = r.invoiceNumber
-          ? `<a class="btn btn-sm btn-outline-primary" href="/api/invoices/${r.id}" target="_blank"><i class="bi bi-file-earmark-pdf me-1"></i>${r.invoiceNumber}</a>`
+          ? `<a class="btn btn-sm btn-outline-primary" href="/api/invoices/${r.id}" target="_blank"><i class="bi bi-file-earmark-pdf me-1"></i>${esc(r.invoiceNumber)}</a>`
           : '<span class="text-muted small">-</span>';
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td class="text-muted">#${r.id}</td>
-          <td>${r.date || ''}</td>
+          <td>${esc(r.date)}</td>
           <td>${fmtTime(r.startHour)} à ${fmtTime(r.startHour + r.hours)} <span class="text-muted small">(${r.hours}h)</span></td>
-          <td><strong>${r.spaceName || ''}</strong></td>
-          <td>${r.ownerName || ''}<div class="text-muted small">${r.ownerEmail || ''}</div></td>
+          <td><strong>${esc(r.spaceName)}</strong></td>
+          <td>${esc(r.ownerName)}<div class="text-muted small">${esc(r.ownerEmail)}</div></td>
           <td>${statusBadge}</td>
           <td class="text-end fw-semibold">${(r.totalTTC || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
           <td class="text-end pe-3">${invoice}</td>`;

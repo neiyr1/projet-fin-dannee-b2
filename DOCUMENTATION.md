@@ -315,9 +315,9 @@ Par défaut, l'application démarre un serveur Kestrel sécurisé écoutant à l
 Lors du tout premier lancement, l'application initialise automatiquement un fichier de base de données SQLite localisé dans le répertoire parent `data/app.db`.
 Les traitements suivants sont exécutés automatiquement au premier démarrage :
 1.  Création des tables et exécution des migrations.
-2.  Provisioning d'un compte administrateur par défaut :
+2.  Provisioning d'un compte administrateur (uniquement si aucun compte Admin n'existe déjà et ne peut se connecter) :
     *   **Email** : `admin@example.com`
-    *   **Mot de passe** : `admin123`
+    *   **Mot de passe** : généré aléatoirement et écrit une seule fois dans `data/ADMIN_INITIAL_PASSWORD.txt` (et affiché dans la console). Connectez-vous, changez ce mot de passe, puis supprimez le fichier — il n'est jamais régénéré tant qu'un admin fonctionnel existe.
 3.  Génération d'un jeu de données d'espaces par défaut (Bureaux nomades, Salles de conférence, Bureaux privés).
 
 ---

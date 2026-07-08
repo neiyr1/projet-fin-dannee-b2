@@ -1,25 +1,28 @@
 using System.Security.Cryptography;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 
-// FONCTIONNALITE: acces centralise a la base SQLite locale du projet.
+// FONCTIONNALITE: acces centralise a la base PostgreSQL du projet.
 public static class DbHelpers
 {
-    public static string GetDbPath(string websitePath)
+    public static string GetConnectionString(IConfiguration config)
     {
-        var projectDir = Path.GetFullPath(Path.Combine(websitePath, ".."));
-        var dataDir = Path.Combine(projectDir, "data");
-        Directory.CreateDirectory(dataDir);
-        return Path.GetFullPath(Path.Combine(dataDir, "app.db"));
+        var connectionString = config["ConnectionStrings:Default"];
+        if (string.IsNullOrWhiteSpace(connectionString))
+            throw new InvalidOperationException(
+                "ConnectionStrings:Default is not configured. Set it in appsettings.json or via the " +
+                "ConnectionStrings__Default environment variable, e.g. " +
+                "\"Host=192.168.10.30;Port=5432;Database=coworking;Username=coworking_app;Password=...\"");
+        return connectionString;
     }
 
-    public static void InitializeDatabase(string dbPath)
+    public static void InitializeDatabase(string connectionString)
     {
-        using var conn = OpenConnection(dbPath);
+        using var conn = OpenConnection(connectionString);
         using var cmd = conn.CreateCommand();
 
         cmd.CommandText = @"
 CREATE TABLE IF NOT EXISTS Users (
-    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    Id SERIAL PRIMARY KEY,
     Name TEXT,
     Last_Name TEXT,
     Email TEXT UNIQUE,
@@ -29,52 +32,52 @@ CREATE TABLE IF NOT EXISTS Users (
 );
 
 CREATE TABLE IF NOT EXISTS Reservation (
-    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    ID SERIAL PRIMARY KEY,
     OwnerId INTEGER NOT NULL,
     Starting_Date TEXT,
     Ending_Date TEXT,
     Status TEXT,
-    Total_Amount REAL,
+    Total_Amount DOUBLE PRECISION,
     FOREIGN KEY(OwnerId) REFERENCES Users(Id)
 );
 
 CREATE TABLE IF NOT EXISTS Facture (
-    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    ID SERIAL PRIMARY KEY,
     Num_facture TEXT,
     date_facture TEXT,
-    Amount_TTC REAL,
+    Amount_TTC DOUBLE PRECISION,
     Payment_Status TEXT,
     ReservationId INTEGER UNIQUE,
     FOREIGN KEY(ReservationId) REFERENCES Reservation(ID)
 );
 
 CREATE TABLE IF NOT EXISTS Ressources (
-    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    ID SERIAL PRIMARY KEY,
     Name_ressource TEXT,
     Type_ressources TEXT,
     Capacity INTEGER,
-    Price REAL,
+    Price DOUBLE PRECISION,
     ReservationId INTEGER,
     FOREIGN KEY(ReservationId) REFERENCES Reservation(ID)
 );
 
 CREATE TABLE IF NOT EXISTS Spaces (
-    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    ID SERIAL PRIMARY KEY,
     Name TEXT NOT NULL,
     Capacity INTEGER,
-    PricePerHour REAL NOT NULL DEFAULT 5.0,
+    PricePerHour DOUBLE PRECISION NOT NULL DEFAULT 5.0,
     Type TEXT NOT NULL DEFAULT 'Nomad'
 );
 
 CREATE TABLE IF NOT EXISTS Rooms (
-    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    ID SERIAL PRIMARY KEY,
     Name TEXT NOT NULL,
     Capacity INTEGER,
     Location TEXT
 );
 
 CREATE TABLE IF NOT EXISTS AuditLog (
-    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    Id SERIAL PRIMARY KEY,
     Timestamp TEXT NOT NULL,
     UserName TEXT,
     Action TEXT NOT NULL,
@@ -83,7 +86,7 @@ CREATE TABLE IF NOT EXISTS AuditLog (
 );
 
 CREATE TABLE IF NOT EXISTS Reminders (
-    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    ID SERIAL PRIMARY KEY,
     ReservationId INTEGER NOT NULL UNIQUE,
     SentAt TEXT NOT NULL
 );";
@@ -97,40 +100,84 @@ CREATE TABLE IF NOT EXISTS Reminders (
         MigrateRessourcesTable(conn);
     }
 
-    public static void SeedAdminUser(string dbPath)
+    public static void SeedAdminUser(string connectionString, string dataDir)
     {
-        using var conn = OpenConnection(dbPath);
-        using var cmd = conn.CreateCommand();
+        using var conn = OpenConnection(connectionString);
 
-        cmd.CommandText = "SELECT COUNT(1) FROM Users WHERE Email = $email";
-        cmd.Parameters.AddWithValue("$email", "admin@example.com");
-        var exists = Convert.ToInt32(cmd.ExecuteScalar() ?? 0) > 0;
-        var hash = CreatePasswordHash("admin123");
+        // Never touch a *working* admin's password: only intervene when literally no admin
+        // account can log in at all (none exist yet, or every existing admin row is missing both
+        // a local password hash and an AD link). A previous version of this method matched on a
+        // hardcoded admin@example.com email and reset that row's password on every restart,
+        // silently undoing any password change the real admin made — and if the admin ever
+        // changed their own email, it would seed a second, duplicate admin account. Matching on
+        // Role = 'Admin' instead avoids both problems while still guaranteeing "someone can log
+        // in" never becomes permanently false.
+        var admins = new List<(int Id, string? PasswordHash, string? AdSam, string? AdUpn)>();
+        using (var sel = conn.CreateCommand())
+        {
+            sel.CommandText = "SELECT Id, PasswordHash, ADSamAccountName, ADUserPrincipalName FROM Users WHERE Role = 'Admin' ORDER BY Id";
+            using var rdr = sel.ExecuteReader();
+            while (rdr.Read())
+                admins.Add((
+                    rdr.GetInt32(0),
+                    rdr.IsDBNull(1) ? null : rdr.GetString(1),
+                    rdr.IsDBNull(2) ? null : rdr.GetString(2),
+                    rdr.IsDBNull(3) ? null : rdr.GetString(3)));
+        }
 
-        if (!exists)
+        bool CanLogIn((int Id, string? PasswordHash, string? AdSam, string? AdUpn) a) =>
+            !string.IsNullOrEmpty(a.PasswordHash) || !string.IsNullOrWhiteSpace(a.AdSam) || !string.IsNullOrWhiteSpace(a.AdUpn);
+
+        if (admins.Count > 0 && admins.Any(CanLogIn)) return;
+
+        var initialPassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(12))
+            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+
+        int targetId;
+        if (admins.Count == 0)
         {
             using var insert = conn.CreateCommand();
-            insert.CommandText = "INSERT INTO Users (Name, Last_Name, Email, Role, PasswordHash) VALUES ($n,$ln,$email,$role,$ph)";
-            insert.Parameters.AddWithValue("$n", "Admin");
-            insert.Parameters.AddWithValue("$ln", "User");
-            insert.Parameters.AddWithValue("$email", "admin@example.com");
-            insert.Parameters.AddWithValue("$role", "Admin");
-            insert.Parameters.AddWithValue("$ph", hash);
-            insert.ExecuteNonQuery();
+            insert.CommandText = @"INSERT INTO Users (Name, Last_Name, Email, Role, PasswordHash) VALUES (@n,@ln,@email,@role,@ph)
+                                    RETURNING Id;";
+            insert.Parameters.AddWithValue("@n", "Admin");
+            insert.Parameters.AddWithValue("@ln", "User");
+            insert.Parameters.AddWithValue("@email", "admin@example.com");
+            insert.Parameters.AddWithValue("@role", "Admin");
+            insert.Parameters.AddWithValue("@ph", CreatePasswordHash(initialPassword));
+            targetId = Convert.ToInt32(insert.ExecuteScalar() ?? 0);
         }
         else
         {
+            // Every existing Admin row is locked out (no password hash, no AD link) — repair the
+            // first one instead of seeding a duplicate admin account.
+            targetId = admins[0].Id;
             using var update = conn.CreateCommand();
-            update.CommandText = "UPDATE Users SET PasswordHash = $ph WHERE Email = $email";
-            update.Parameters.AddWithValue("$ph", hash);
-            update.Parameters.AddWithValue("$email", "admin@example.com");
+            update.CommandText = "UPDATE Users SET PasswordHash = @ph WHERE Id = @id";
+            update.Parameters.AddWithValue("@ph", CreatePasswordHash(initialPassword));
+            update.Parameters.AddWithValue("@id", targetId);
             update.ExecuteNonQuery();
         }
+
+        // Written into the app's local data directory (same trust boundary/ACLs as invoices/outbox)
+        // instead of stdout, since stdout is commonly redirected to a log file with broader read
+        // access than intended when running as a service — that would otherwise leak the password
+        // to anyone with log access.
+        Directory.CreateDirectory(dataDir);
+        var passwordFilePath = Path.Combine(dataDir, "ADMIN_INITIAL_PASSWORD.txt");
+        File.WriteAllText(passwordFilePath,
+            $"Admin user Id {targetId} / password: {initialPassword}\r\nLog in, change this password, then delete this file. It will not be regenerated.\r\n");
+
+        Console.WriteLine("======================================================================");
+        Console.WriteLine($" Admin account ready (Id {targetId}). Initial password written to:");
+        Console.WriteLine($" {passwordFilePath}");
+        Console.WriteLine(" Log in, change the password, then delete that file. It will not be");
+        Console.WriteLine(" regenerated or reset on later restarts unless every admin is locked out again.");
+        Console.WriteLine("======================================================================");
     }
 
-    public static void SeedDefaultSpaces(string dbPath)
+    public static void SeedDefaultSpaces(string connectionString)
     {
-        using var conn = OpenConnection(dbPath);
+        using var conn = OpenConnection(connectionString);
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(1) FROM Spaces";
         if (Convert.ToInt32(cmd.ExecuteScalar() ?? 0) > 0) return;
@@ -146,11 +193,11 @@ CREATE TABLE IF NOT EXISTS Reminders (
         foreach (var s in seed)
         {
             using var ins = conn.CreateCommand();
-            ins.CommandText = "INSERT INTO Spaces (Name, Capacity, PricePerHour, Type) VALUES ($n, $c, $p, $t)";
-            ins.Parameters.AddWithValue("$n", s.Name);
-            ins.Parameters.AddWithValue("$c", s.Capacity);
-            ins.Parameters.AddWithValue("$p", s.Price);
-            ins.Parameters.AddWithValue("$t", s.Type);
+            ins.CommandText = "INSERT INTO Spaces (Name, Capacity, PricePerHour, Type) VALUES (@n, @c, @p, @t)";
+            ins.Parameters.AddWithValue("@n", s.Name);
+            ins.Parameters.AddWithValue("@c", s.Capacity);
+            ins.Parameters.AddWithValue("@p", s.Price);
+            ins.Parameters.AddWithValue("@t", s.Type);
             ins.ExecuteNonQuery();
         }
     }
@@ -174,18 +221,18 @@ CREATE TABLE IF NOT EXISTS Reminders (
         catch { return false; }
     }
 
-    public static void WriteAudit(string dbPath, string? userName, string action, string? target = null, string? details = null)
+    public static void WriteAudit(string connectionString, string? userName, string action, string? target = null, string? details = null)
     {
         try
         {
-            using var conn = OpenConnection(dbPath);
+            using var conn = OpenConnection(connectionString);
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = "INSERT INTO AuditLog (Timestamp, UserName, Action, Target, Details) VALUES ($ts, $u, $a, $t, $d)";
-            cmd.Parameters.AddWithValue("$ts", DateTime.UtcNow.ToString("o"));
-            cmd.Parameters.AddWithValue("$u", (object?)userName ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$a", action);
-            cmd.Parameters.AddWithValue("$t", (object?)target ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$d", (object?)details ?? DBNull.Value);
+            cmd.CommandText = "INSERT INTO AuditLog (Timestamp, UserName, Action, Target, Details) VALUES (@ts, @u, @a, @t, @d)";
+            cmd.Parameters.AddWithValue("@ts", DateTime.UtcNow.ToString("o"));
+            cmd.Parameters.AddWithValue("@u", (object?)userName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@a", action);
+            cmd.Parameters.AddWithValue("@t", (object?)target ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@d", (object?)details ?? DBNull.Value);
             cmd.ExecuteNonQuery();
         }
         catch { /* never break the request because of audit */ }
@@ -193,12 +240,16 @@ CREATE TABLE IF NOT EXISTS Reminders (
 
     // --- Private helpers ---
 
-    public static SqliteConnection OpenConnection(string dbPath)
+    public static NpgsqlConnection OpenConnection(string connectionString)
     {
-        var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath }.ConnectionString);
+        var conn = new NpgsqlConnection(connectionString);
         conn.Open();
         return conn;
     }
+
+    // SQLSTATE 23505 == unique_violation. Used to turn a raced-past-the-app-level-check unique
+    // violation (Email or Name) into a friendly 409 instead of an unhandled 500.
+    public static bool IsUniqueConstraintViolation(PostgresException ex) => ex.SqlState == PostgresErrorCodes.UniqueViolation;
 
     public static string CreatePasswordHash(string password)
     {
@@ -212,27 +263,28 @@ CREATE TABLE IF NOT EXISTS Reminders (
         return Convert.ToBase64String(outBytes);
     }
 
-    static void MigrateUsersTable(SqliteConnection conn)
+    static Dictionary<string, bool> GetExistingColumns(NpgsqlConnection conn, string tableName, IEnumerable<string> columnsToCheck)
     {
-        using var pragma = conn.CreateCommand();
-        pragma.CommandText = "PRAGMA table_info(Users);";
-        using var rdr = pragma.ExecuteReader();
-        var has = new Dictionary<string, bool>
-        {
-            ["passwordhash"] = false,
-            ["emailverified"] = false,
-            ["emailverifytoken"] = false,
-            ["adsamaccountname"] = false,
-            ["aduserprincipalname"] = false,
-            ["adobjectguid"] = false,
-            ["accountenabled"] = false
-        };
+        var has = columnsToCheck.ToDictionary(c => c, _ => false);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = @t";
+        cmd.Parameters.AddWithValue("@t", tableName.ToLowerInvariant());
+        using var rdr = cmd.ExecuteReader();
         while (rdr.Read())
         {
-            var col = (rdr.IsDBNull(1) ? string.Empty : rdr.GetString(1)).ToLowerInvariant();
+            var col = rdr.GetString(0).ToLowerInvariant();
             if (has.ContainsKey(col)) has[col] = true;
         }
-        rdr.Close();
+        return has;
+    }
+
+    static void MigrateUsersTable(NpgsqlConnection conn)
+    {
+        var has = GetExistingColumns(conn, "Users", new[]
+        {
+            "passwordhash", "emailverified", "emailverifytoken",
+            "adsamaccountname", "aduserprincipalname", "adobjectguid", "accountenabled"
+        });
 
         var migrations = new Dictionary<string, string>
         {
@@ -263,24 +315,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS UX_Users_ADUserPrincipalName ON Users(ADUserPr
 CREATE UNIQUE INDEX IF NOT EXISTS UX_Users_ADObjectGuid ON Users(ADObjectGuid) WHERE ADObjectGuid IS NOT NULL;";
             idx.ExecuteNonQuery();
         }
+
+        // Name doubles as a login identifier alongside Email, so it must be unique too — enforced
+        // here at the DB level (not just an app-level check-then-insert, which races under concurrent
+        // signups) so every write path is protected, not only the ones that remember to pre-check.
+        try
+        {
+            using var nameIdx = conn.CreateCommand();
+            nameIdx.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS UX_Users_Name ON Users (LOWER(Name)) WHERE Name IS NOT NULL;";
+            nameIdx.ExecuteNonQuery();
+        }
+        catch (PostgresException)
+        {
+            // Pre-existing duplicate Names from before this constraint was introduced block index
+            // creation; the app-level uniqueness checks still stop new duplicates. Deduplicate the
+            // offending rows manually (e.g. `SELECT LOWER(Name), COUNT(*) FROM Users GROUP BY
+            // LOWER(Name) HAVING COUNT(*) > 1`) and restart to get the DB-level guarantee back.
+        }
     }
 
-    static void MigrateReservationTable(SqliteConnection conn)
+    static void MigrateReservationTable(NpgsqlConnection conn)
     {
-        using var pragma = conn.CreateCommand();
-        pragma.CommandText = "PRAGMA table_info(Reservation);";
-        using var rdr = pragma.ExecuteReader();
-        var has = new Dictionary<string, bool>
+        var has = GetExistingColumns(conn, "Reservation", new[]
         {
-            ["spaceid"] = false, ["date"] = false, ["starthour"] = false, ["hours"] = false,
-            ["attendees"] = false, ["accesstoken"] = false
-        };
-        while (rdr.Read())
-        {
-            var col = (rdr.IsDBNull(1) ? string.Empty : rdr.GetString(1)).ToLowerInvariant();
-            if (has.ContainsKey(col)) has[col] = true;
-        }
-        rdr.Close();
+            "spaceid", "date", "starthour", "hours", "attendees", "accesstoken"
+        });
 
         var migrations = new Dictionary<string, string>
         {
@@ -303,22 +362,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS UX_Users_ADObjectGuid ON Users(ADObjectGuid) W
         }
     }
 
-    static void MigrateSpacesTable(SqliteConnection conn)
+    static void MigrateSpacesTable(NpgsqlConnection conn)
     {
-        using var pragma = conn.CreateCommand();
-        pragma.CommandText = "PRAGMA table_info(Spaces);";
-        using var rdr = pragma.ExecuteReader();
-        var has = new Dictionary<string, bool> { ["priceperhour"] = false, ["type"] = false };
-        while (rdr.Read())
-        {
-            var col = (rdr.IsDBNull(1) ? string.Empty : rdr.GetString(1)).ToLowerInvariant();
-            if (has.ContainsKey(col)) has[col] = true;
-        }
-        rdr.Close();
+        var has = GetExistingColumns(conn, "Spaces", new[] { "priceperhour", "type" });
         if (!has["priceperhour"])
         {
             using var a = conn.CreateCommand();
-            a.CommandText = "ALTER TABLE Spaces ADD COLUMN PricePerHour REAL NOT NULL DEFAULT 5.0;";
+            a.CommandText = "ALTER TABLE Spaces ADD COLUMN PricePerHour DOUBLE PRECISION NOT NULL DEFAULT 5.0;";
             a.ExecuteNonQuery();
         }
         if (!has["type"])
@@ -329,18 +379,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS UX_Users_ADObjectGuid ON Users(ADObjectGuid) W
         }
     }
 
-    static void MigrateRessourcesTable(SqliteConnection conn)
+    static void MigrateRessourcesTable(NpgsqlConnection conn)
     {
-        using var pragma = conn.CreateCommand();
-        pragma.CommandText = "PRAGMA table_info(Ressources);";
-        using var rdr = pragma.ExecuteReader();
-        var has = new Dictionary<string, bool> { ["spaceid"] = false };
-        while (rdr.Read())
-        {
-            var col = (rdr.IsDBNull(1) ? string.Empty : rdr.GetString(1)).ToLowerInvariant();
-            if (has.ContainsKey(col)) has[col] = true;
-        }
-        rdr.Close();
+        var has = GetExistingColumns(conn, "Ressources", new[] { "spaceid" });
         if (!has["spaceid"])
         {
             using var a = conn.CreateCommand();
@@ -349,27 +390,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS UX_Users_ADObjectGuid ON Users(ADObjectGuid) W
         }
     }
 
-    static void MigrateFactureTable(SqliteConnection conn)
+    static void MigrateFactureTable(NpgsqlConnection conn)
     {
-        using var pragma = conn.CreateCommand();
-        pragma.CommandText = "PRAGMA table_info(Facture);";
-        using var rdr = pragma.ExecuteReader();
-        var has = new Dictionary<string, bool>
-        {
-            ["pdfpath"] = false, ["amount_ht"] = false, ["amount_tva"] = false
-        };
-        while (rdr.Read())
-        {
-            var col = (rdr.IsDBNull(1) ? string.Empty : rdr.GetString(1)).ToLowerInvariant();
-            if (has.ContainsKey(col)) has[col] = true;
-        }
-        rdr.Close();
+        var has = GetExistingColumns(conn, "Facture", new[] { "pdfpath", "amount_ht", "amount_tva" });
 
         var migrations = new Dictionary<string, string>
         {
             ["pdfpath"] = "ALTER TABLE Facture ADD COLUMN PdfPath TEXT;",
-            ["amount_ht"] = "ALTER TABLE Facture ADD COLUMN Amount_HT REAL;",
-            ["amount_tva"] = "ALTER TABLE Facture ADD COLUMN Amount_TVA REAL;"
+            ["amount_ht"] = "ALTER TABLE Facture ADD COLUMN Amount_HT DOUBLE PRECISION;",
+            ["amount_tva"] = "ALTER TABLE Facture ADD COLUMN Amount_TVA DOUBLE PRECISION;"
         };
 
         foreach (var (k, sql) in migrations)

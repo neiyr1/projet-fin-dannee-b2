@@ -1,7 +1,9 @@
 using System.Security.Claims;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.Data.Sqlite;
+using Microsoft.AspNetCore.RateLimiting;
+using Npgsql;
 using QuestPDF.Infrastructure;
 
 // FONCTIONNALITE: configuration globale du site Razor, services metier et authentification.
@@ -28,10 +30,10 @@ builder.Services.AddRazorPages(opts =>
     opts.Conventions.AllowAnonymousToPage("/Signup");
 });
 
-builder.Services.AddSingleton(sp => new InvoiceService(DbHelpers.GetDbPath(websitePath), invoicesDir, sp.GetRequiredService<IConfiguration>()));
+builder.Services.AddSingleton(sp => new InvoiceService(DbHelpers.GetConnectionString(builder.Configuration), invoicesDir, sp.GetRequiredService<IConfiguration>()));
 builder.Services.AddSingleton(sp => new EmailService(sp.GetRequiredService<IConfiguration>(), sp.GetRequiredService<ILogger<EmailService>>(), outboxDir));
 builder.Services.AddSingleton<ActiveDirectoryService>();
-builder.Services.AddHostedService(sp => new ReminderService(DbHelpers.GetDbPath(websitePath), sp.GetRequiredService<EmailService>(), sp.GetRequiredService<ILogger<ReminderService>>()));
+builder.Services.AddHostedService(sp => new ReminderService(DbHelpers.GetConnectionString(builder.Configuration), sp.GetRequiredService<EmailService>(), sp.GetRequiredService<ILogger<ReminderService>>()));
 
 builder.WebHost.ConfigureKestrel(opts =>
 {
@@ -45,6 +47,7 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         opts.LoginPath = "/Login";
         opts.Cookie.HttpOnly = true;
         opts.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        opts.Cookie.SameSite = SameSiteMode.Strict;
         opts.Events = new CookieAuthenticationEvents
         {
             OnValidatePrincipal = async context =>
@@ -54,10 +57,10 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 
                 try
                 {
-                    using var conn = DbHelpers.OpenConnection(DbHelpers.GetDbPath(websitePath));
+                    using var conn = DbHelpers.OpenConnection(DbHelpers.GetConnectionString(builder.Configuration));
                     using var cmd = conn.CreateCommand();
-                    cmd.CommandText = "SELECT COALESCE(AccountEnabled, 1) FROM Users WHERE Id = $id";
-                    cmd.Parameters.AddWithValue("$id", userId);
+                    cmd.CommandText = "SELECT COALESCE(AccountEnabled, 1) FROM Users WHERE Id = @id";
+                    cmd.Parameters.AddWithValue("@id", userId);
                     var enabled = Convert.ToInt32(cmd.ExecuteScalar() ?? 0) == 1;
                     if (!enabled)
                     {
@@ -74,6 +77,26 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     });
 builder.Services.AddAuthorization();
 
+// FONCTIONNALITE: limitation du taux de requetes sur les endpoints d'authentification (anti brute-force).
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    // Partitioned by IP only, so this is a shared-office-safe ceiling rather than tight per-account
+    // brute-force protection (this app is a coworking space — many real users share one NAT'd IP,
+    // and a burst of normal mistyped-password retries from different people must not lock everyone
+    // out). It's defense in depth on top of the 12-char minimum password length, not the sole guard
+    // against brute force. A short queue smooths bursts into a small delay instead of a hard reject.
+    options.AddPolicy("auth", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 30,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 5,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+        }));
+});
+
 var app = builder.Build();
 
 var defaultFilesOptions = new DefaultFilesOptions();
@@ -83,12 +106,13 @@ app.UseDefaultFiles(defaultFilesOptions);
 app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 app.MapRazorPages();
 
-// FONCTIONNALITE: initialisation SQLite et structure des tables applicatives.
+// FONCTIONNALITE: initialisation PostgreSQL et structure des tables applicatives.
 // --- Database init ---
 
-string GetDbPath() => DbHelpers.GetDbPath(websitePath);
+string GetConnectionString() => DbHelpers.GetConnectionString(builder.Configuration);
 
 static Claim[] BuildAuthClaims(int userId, string name, string role, string? email = null, string? adObjectGuid = null)
 {
@@ -121,42 +145,42 @@ static ActiveDirectoryUserLink ProvisionAdAccountOrThrow(ActiveDirectoryService 
     return adService.CreateUser(name, email, password);
 }
 
-static void SaveAdLink(Microsoft.Data.Sqlite.SqliteConnection conn, int userId, ActiveDirectoryUserLink adLink, bool clearLocalPassword)
+static void SaveAdLink(NpgsqlConnection conn, int userId, ActiveDirectoryUserLink adLink, bool clearLocalPassword)
 {
     if (!adLink.Created) return;
     using var upd = conn.CreateCommand();
     upd.CommandText = @"UPDATE Users
-                        SET ADSamAccountName = $sam,
-                            ADUserPrincipalName = $upn,
-                            ADObjectGuid = $guid,
-                            PasswordHash = CASE WHEN $clear = 1 THEN NULL ELSE PasswordHash END
-                        WHERE Id = $id";
-    upd.Parameters.AddWithValue("$sam", (object?)adLink.SamAccountName ?? DBNull.Value);
-    upd.Parameters.AddWithValue("$upn", (object?)adLink.UserPrincipalName ?? DBNull.Value);
-    upd.Parameters.AddWithValue("$guid", (object?)adLink.ObjectGuid ?? DBNull.Value);
-    upd.Parameters.AddWithValue("$clear", clearLocalPassword ? 1 : 0);
-    upd.Parameters.AddWithValue("$id", userId);
+                        SET ADSamAccountName = @sam,
+                            ADUserPrincipalName = @upn,
+                            ADObjectGuid = @guid,
+                            PasswordHash = CASE WHEN @clear = 1 THEN NULL ELSE PasswordHash END
+                        WHERE Id = @id";
+    upd.Parameters.AddWithValue("@sam", (object?)adLink.SamAccountName ?? DBNull.Value);
+    upd.Parameters.AddWithValue("@upn", (object?)adLink.UserPrincipalName ?? DBNull.Value);
+    upd.Parameters.AddWithValue("@guid", (object?)adLink.ObjectGuid ?? DBNull.Value);
+    upd.Parameters.AddWithValue("@clear", clearLocalPassword ? 1 : 0);
+    upd.Parameters.AddWithValue("@id", userId);
     upd.ExecuteNonQuery();
 }
 
-static IResult? EnsureAdLinkedForBooking(HttpContext http, Microsoft.Data.Sqlite.SqliteConnection conn, ActiveDirectoryService adService)
+// FONCTIONNALITE: resout l'Id utilisateur depuis le cookie d'authentification (jamais depuis Name/Email, non uniques).
+static int? CurrentUserId(HttpContext http)
+{
+    var idClaim = http.User?.FindFirstValue(ClaimTypes.NameIdentifier);
+    return int.TryParse(idClaim, out var id) ? id : null;
+}
+
+static IResult? EnsureAdLinkedForBooking(HttpContext http, NpgsqlConnection conn, ActiveDirectoryService adService)
 {
     if (!adService.IsEnabled) return null;
     if (http.User.IsInRole("Admin")) return null;
 
-    var idClaim = http.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    var userId = CurrentUserId(http);
+    if (userId == null) return Results.Unauthorized();
+
     using var cmd = conn.CreateCommand();
-    if (int.TryParse(idClaim, out var userId))
-    {
-        cmd.CommandText = "SELECT ADSamAccountName, ADUserPrincipalName FROM Users WHERE Id = $id";
-        cmd.Parameters.AddWithValue("$id", userId);
-    }
-    else
-    {
-        var name = http.User?.Identity?.Name ?? string.Empty;
-        cmd.CommandText = "SELECT ADSamAccountName, ADUserPrincipalName FROM Users WHERE Name = $n OR Email = $n LIMIT 1";
-        cmd.Parameters.AddWithValue("$n", name);
-    }
+    cmd.CommandText = "SELECT ADSamAccountName, ADUserPrincipalName FROM Users WHERE Id = @id";
+    cmd.Parameters.AddWithValue("@id", userId.Value);
 
     using var rdr = cmd.ExecuteReader();
     if (!rdr.Read()) return Results.Unauthorized();
@@ -167,10 +191,10 @@ static IResult? EnsureAdLinkedForBooking(HttpContext http, Microsoft.Data.Sqlite
     return Results.Json(new { error = "Compte Active Directory manquant. Deconnectez-vous puis reconnectez-vous pour creer le compte AD avant de reserver." }, statusCode: StatusCodes.Status409Conflict);
 }
 
-var dbPath = GetDbPath();
-DbHelpers.InitializeDatabase(dbPath);
-DbHelpers.SeedAdminUser(dbPath);
-DbHelpers.SeedDefaultSpaces(dbPath);
+var connectionString = GetConnectionString();
+DbHelpers.InitializeDatabase(connectionString);
+DbHelpers.SeedAdminUser(connectionString, dataRoot);
+DbHelpers.SeedDefaultSpaces(connectionString);
 
 // --- Auth endpoints ---
 
@@ -183,13 +207,13 @@ app.MapPost("/api/login", async (HttpContext http, ActiveDirectoryService adServ
 
     try
     {
-        using var conn = DbHelpers.OpenConnection(GetDbPath());
+        using var conn = DbHelpers.OpenConnection(GetConnectionString());
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT Id, Name, Email, Role, PasswordHash, ADSamAccountName, ADUserPrincipalName, ADObjectGuid, COALESCE(AccountEnabled, 1)
                             FROM Users
-                            WHERE Email = $u OR Name = $u OR ADSamAccountName = $u OR ADUserPrincipalName = $u
+                            WHERE Email = @u OR Name = @u OR ADSamAccountName = @u OR ADUserPrincipalName = @u
                             LIMIT 1";
-        cmd.Parameters.AddWithValue("$u", username);
+        cmd.Parameters.AddWithValue("@u", username);
         using var rdr = cmd.ExecuteReader();
         if (rdr.Read())
         {
@@ -257,7 +281,7 @@ app.MapPost("/api/login", async (HttpContext http, ActiveDirectoryService adServ
     catch { /* DB errors fall through to unauthorized */ }
 
     return Results.Unauthorized();
-});
+}).RequireRateLimiting("auth");
 
 app.MapPost("/api/logout", async (HttpContext http) =>
 {
@@ -287,18 +311,28 @@ app.MapPost("/api/signup", async (HttpContext http, EmailService emailSvc, Activ
 
     if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         return Results.BadRequest(new { error = "Name, email and password are required" });
-    if (password.Length < 6)
-        return Results.BadRequest(new { error = "Password must be at least 6 characters" });
+    if (password.Length < 12)
+        return Results.BadRequest(new { error = "Password must be at least 12 characters" });
     if (!email.Contains('@'))
         return Results.BadRequest(new { error = "Invalid email" });
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using (var chk = conn.CreateCommand())
     {
-        chk.CommandText = "SELECT COUNT(1) FROM Users WHERE Email = $e";
-        chk.Parameters.AddWithValue("$e", email);
+        chk.CommandText = "SELECT COUNT(1) FROM Users WHERE Email = @e";
+        chk.Parameters.AddWithValue("@e", email);
         if (Convert.ToInt32(chk.ExecuteScalar() ?? 0) > 0)
             return Results.Conflict(new { error = "Email already registered" });
+    }
+    using (var chkName = conn.CreateCommand())
+    {
+        // Name doubles as a login identifier alongside Email, so it must stay unique too
+        // (defense in depth — reservation ownership no longer depends on it, but ambiguous
+        // logins and account-enumeration confusion still would without this check).
+        chkName.CommandText = "SELECT COUNT(1) FROM Users WHERE LOWER(Name) = LOWER(@n)";
+        chkName.Parameters.AddWithValue("@n", name);
+        if (Convert.ToInt32(chkName.ExecuteScalar() ?? 0) > 0)
+            return Results.Conflict(new { error = "Name already in use" });
     }
 
     ActiveDirectoryUserLink adLink;
@@ -315,17 +349,26 @@ app.MapPost("/api/signup", async (HttpContext http, EmailService emailSvc, Activ
     var verifyToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
     using var ins = conn.CreateCommand();
     ins.CommandText = @"INSERT INTO Users (Name, Email, Role, PasswordHash, EmailVerified, EmailVerifyToken, ADSamAccountName, ADUserPrincipalName, ADObjectGuid)
-                        VALUES ($n,$e,$r,$ph,0,$tok,$sam,$upn,$guid);
-                        SELECT last_insert_rowid();";
-    ins.Parameters.AddWithValue("$n", name);
-    ins.Parameters.AddWithValue("$e", email);
-    ins.Parameters.AddWithValue("$r", "User");
-    ins.Parameters.AddWithValue("$ph", adLink.Created ? DBNull.Value : DbHelpers.CreatePasswordHash(password));
-    ins.Parameters.AddWithValue("$tok", verifyToken);
-    ins.Parameters.AddWithValue("$sam", (object?)adLink.SamAccountName ?? DBNull.Value);
-    ins.Parameters.AddWithValue("$upn", (object?)adLink.UserPrincipalName ?? DBNull.Value);
-    ins.Parameters.AddWithValue("$guid", (object?)adLink.ObjectGuid ?? DBNull.Value);
-    var id = Convert.ToInt32(ins.ExecuteScalar() ?? 0);
+                        VALUES (@n,@e,@r,@ph,0,@tok,@sam,@upn,@guid)
+                        RETURNING Id;";
+    ins.Parameters.AddWithValue("@n", name);
+    ins.Parameters.AddWithValue("@e", email);
+    ins.Parameters.AddWithValue("@r", "User");
+    ins.Parameters.AddWithValue("@ph", adLink.Created ? DBNull.Value : DbHelpers.CreatePasswordHash(password));
+    ins.Parameters.AddWithValue("@tok", verifyToken);
+    ins.Parameters.AddWithValue("@sam", (object?)adLink.SamAccountName ?? DBNull.Value);
+    ins.Parameters.AddWithValue("@upn", (object?)adLink.UserPrincipalName ?? DBNull.Value);
+    ins.Parameters.AddWithValue("@guid", (object?)adLink.ObjectGuid ?? DBNull.Value);
+    int id;
+    try
+    {
+        id = Convert.ToInt32(ins.ExecuteScalar() ?? 0);
+    }
+    catch (PostgresException ex) when (DbHelpers.IsUniqueConstraintViolation(ex))
+    {
+        // The pre-check above raced with a concurrent signup; the DB-level UNIQUE index caught it.
+        return Results.Conflict(new { error = "Name or email already registered" });
+    }
 
     var claims = BuildAuthClaims(id, name, "User", email, adLink.ObjectGuid);
     var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
@@ -341,17 +384,17 @@ app.MapPost("/api/signup", async (HttpContext http, EmailService emailSvc, Activ
         adUserPrincipalName = adLink.UserPrincipalName,
         adObjectGuid = adLink.ObjectGuid
     });
-});
+}).RequireRateLimiting("auth");
 
 app.MapGet("/api/verify-email", (string? token) =>
 {
     if (string.IsNullOrWhiteSpace(token))
         return Results.Content("<html><body style='font-family:sans-serif;padding:40px'><h2>Invalid verification link</h2></body></html>", "text/html");
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using var cmd = conn.CreateCommand();
-    cmd.CommandText = "UPDATE Users SET EmailVerified = 1, EmailVerifyToken = NULL WHERE EmailVerifyToken = $tok";
-    cmd.Parameters.AddWithValue("$tok", token);
+    cmd.CommandText = "UPDATE Users SET EmailVerified = 1, EmailVerifyToken = NULL WHERE EmailVerifyToken = @tok";
+    cmd.Parameters.AddWithValue("@tok", token);
     var updated = cmd.ExecuteNonQuery();
 
     if (updated == 0)
@@ -367,7 +410,7 @@ app.MapGet("/api/users", (HttpContext http) =>
 {
     if (!http.User.IsInRole("Admin")) return Results.Forbid();
     var list = new List<object>();
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using var cmd = conn.CreateCommand();
     cmd.CommandText = @"SELECT u.Id, u.Name, u.Last_Name, u.Email, u.Role,
                                (SELECT COUNT(1) FROM Reservation r WHERE r.OwnerId = u.Id) AS BookingsCount,
@@ -398,10 +441,10 @@ app.MapGet("/api/users", (HttpContext http) =>
 app.MapPost("/api/users/{id:int}/verify-email", (HttpContext http, int id) =>
 {
     if (!http.User.IsInRole("Admin")) return Results.Forbid();
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using var cmd = conn.CreateCommand();
-    cmd.CommandText = "UPDATE Users SET EmailVerified = 1, EmailVerifyToken = NULL WHERE Id = $id";
-    cmd.Parameters.AddWithValue("$id", id);
+    cmd.CommandText = "UPDATE Users SET EmailVerified = 1, EmailVerifyToken = NULL WHERE Id = @id";
+    cmd.Parameters.AddWithValue("@id", id);
     var rows = cmd.ExecuteNonQuery();
     return rows == 0 ? Results.NotFound() : Results.Ok(new { id, emailVerified = true });
 }).RequireAuthorization();
@@ -409,13 +452,13 @@ app.MapPost("/api/users/{id:int}/verify-email", (HttpContext http, int id) =>
 app.MapPost("/api/users/{id:int}/resend-welcome", async (HttpContext http, int id, EmailService emailSvc, ILogger<Program> logger) =>
 {
     if (!http.User.IsInRole("Admin")) return Results.Forbid();
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
 
     string? email = null, name = null;
     using (var sel = conn.CreateCommand())
     {
-        sel.CommandText = "SELECT Name, Email FROM Users WHERE Id = $id";
-        sel.Parameters.AddWithValue("$id", id);
+        sel.CommandText = "SELECT Name, Email FROM Users WHERE Id = @id";
+        sel.Parameters.AddWithValue("@id", id);
         using var r = sel.ExecuteReader();
         if (!r.Read()) return Results.NotFound();
         name = r.IsDBNull(0) ? null : r.GetString(0);
@@ -426,9 +469,9 @@ app.MapPost("/api/users/{id:int}/resend-welcome", async (HttpContext http, int i
     var token = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
     using (var upd = conn.CreateCommand())
     {
-        upd.CommandText = "UPDATE Users SET EmailVerifyToken = $tok WHERE Id = $id";
-        upd.Parameters.AddWithValue("$tok", token);
-        upd.Parameters.AddWithValue("$id", id);
+        upd.CommandText = "UPDATE Users SET EmailVerifyToken = @tok WHERE Id = @id";
+        upd.Parameters.AddWithValue("@tok", token);
+        upd.Parameters.AddWithValue("@id", id);
         upd.ExecuteNonQuery();
     }
 
@@ -456,21 +499,31 @@ app.MapPost("/api/users", async (HttpContext http, ActiveDirectoryService adServ
     name = (name ?? string.Empty).Trim();
     email = (email ?? string.Empty).Trim();
     role = string.IsNullOrWhiteSpace(role) ? "User" : role.Trim();
-    password = string.IsNullOrEmpty(password) ? "changeme123" : password;
+    var passwordWasGenerated = string.IsNullOrEmpty(password);
+    password = passwordWasGenerated ? "ChangeMe-" + Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(6)) : password ?? string.Empty;
 
     if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(email))
         return Results.BadRequest(new { error = "Name and email required" });
+    if (password.Length < 12)
+        return Results.BadRequest(new { error = "Password must be at least 12 characters" });
 
     var allowedRoles = new[] { "User", "Admin", "Member", "Accueil", "Comptabilite" };
     if (!allowedRoles.Contains(role)) return Results.BadRequest(new { error = "Invalid role" });
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using (var chk = conn.CreateCommand())
     {
-        chk.CommandText = "SELECT COUNT(1) FROM Users WHERE Email = $e";
-        chk.Parameters.AddWithValue("$e", email);
+        chk.CommandText = "SELECT COUNT(1) FROM Users WHERE Email = @e";
+        chk.Parameters.AddWithValue("@e", email);
         if (Convert.ToInt32(chk.ExecuteScalar() ?? 0) > 0)
             return Results.Conflict(new { error = "Email already in use" });
+    }
+    using (var chkName = conn.CreateCommand())
+    {
+        chkName.CommandText = "SELECT COUNT(1) FROM Users WHERE LOWER(Name) = LOWER(@n)";
+        chkName.Parameters.AddWithValue("@n", name);
+        if (Convert.ToInt32(chkName.ExecuteScalar() ?? 0) > 0)
+            return Results.Conflict(new { error = "Name already in use" });
     }
 
     ActiveDirectoryUserLink adLink;
@@ -491,21 +544,30 @@ app.MapPost("/api/users", async (HttpContext http, ActiveDirectoryService adServ
 
     using var ins = conn.CreateCommand();
     ins.CommandText = @"INSERT INTO Users (Name, Email, Role, PasswordHash, ADSamAccountName, ADUserPrincipalName, ADObjectGuid)
-                        VALUES ($n,$e,$r,$ph,$sam,$upn,$guid);
-                        SELECT last_insert_rowid();";
-    ins.Parameters.AddWithValue("$n", name);
-    ins.Parameters.AddWithValue("$e", email);
-    ins.Parameters.AddWithValue("$r", role);
-    ins.Parameters.AddWithValue("$ph", adLink.Created ? DBNull.Value : DbHelpers.CreatePasswordHash(password));
-    ins.Parameters.AddWithValue("$sam", (object?)adLink.SamAccountName ?? DBNull.Value);
-    ins.Parameters.AddWithValue("$upn", (object?)adLink.UserPrincipalName ?? DBNull.Value);
-    ins.Parameters.AddWithValue("$guid", (object?)adLink.ObjectGuid ?? DBNull.Value);
-    var id = Convert.ToInt32(ins.ExecuteScalar() ?? 0);
+                        VALUES (@n,@e,@r,@ph,@sam,@upn,@guid)
+                        RETURNING Id;";
+    ins.Parameters.AddWithValue("@n", name);
+    ins.Parameters.AddWithValue("@e", email);
+    ins.Parameters.AddWithValue("@r", role);
+    ins.Parameters.AddWithValue("@ph", adLink.Created ? DBNull.Value : DbHelpers.CreatePasswordHash(password));
+    ins.Parameters.AddWithValue("@sam", (object?)adLink.SamAccountName ?? DBNull.Value);
+    ins.Parameters.AddWithValue("@upn", (object?)adLink.UserPrincipalName ?? DBNull.Value);
+    ins.Parameters.AddWithValue("@guid", (object?)adLink.ObjectGuid ?? DBNull.Value);
+    int id;
+    try
+    {
+        id = Convert.ToInt32(ins.ExecuteScalar() ?? 0);
+    }
+    catch (PostgresException ex) when (DbHelpers.IsUniqueConstraintViolation(ex))
+    {
+        return Results.Conflict(new { error = "Name or email already in use" });
+    }
     return Results.Created($"/api/users/{id}", new {
         id, name, email, role,
         adSamAccountName = adLink.SamAccountName,
         adUserPrincipalName = adLink.UserPrincipalName,
-        adObjectGuid = adLink.ObjectGuid
+        adObjectGuid = adLink.ObjectGuid,
+        generatedPassword = passwordWasGenerated ? password : null
     });
 }).RequireAuthorization();
 
@@ -519,22 +581,30 @@ app.MapPut("/api/users/{id:int}", async (HttpContext http, int id) =>
     body.TryGetValue("email", out var email);
     body.TryGetValue("role", out var role);
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     var sets = new List<string>();
     using var cmd = conn.CreateCommand();
-    if (!string.IsNullOrWhiteSpace(name)) { sets.Add("Name = $n"); cmd.Parameters.AddWithValue("$n", name); }
-    if (!string.IsNullOrWhiteSpace(email)) { sets.Add("Email = $e"); cmd.Parameters.AddWithValue("$e", email); }
+    if (!string.IsNullOrWhiteSpace(name)) { sets.Add("Name = @n"); cmd.Parameters.AddWithValue("@n", name); }
+    if (!string.IsNullOrWhiteSpace(email)) { sets.Add("Email = @e"); cmd.Parameters.AddWithValue("@e", email); }
     if (!string.IsNullOrWhiteSpace(role))
     {
         var allowed = new[] { "User", "Admin", "Member", "Accueil", "Comptabilite" };
         if (!allowed.Contains(role)) return Results.BadRequest(new { error = "Invalid role" });
-        sets.Add("Role = $r"); cmd.Parameters.AddWithValue("$r", role);
+        sets.Add("Role = @r"); cmd.Parameters.AddWithValue("@r", role);
     }
     if (sets.Count == 0) return Results.BadRequest(new { error = "Nothing to update" });
 
-    cmd.CommandText = $"UPDATE Users SET {string.Join(", ", sets)} WHERE Id = $id";
-    cmd.Parameters.AddWithValue("$id", id);
-    var rows = cmd.ExecuteNonQuery();
+    cmd.CommandText = $"UPDATE Users SET {string.Join(", ", sets)} WHERE Id = @id";
+    cmd.Parameters.AddWithValue("@id", id);
+    int rows;
+    try
+    {
+        rows = cmd.ExecuteNonQuery();
+    }
+    catch (PostgresException ex) when (DbHelpers.IsUniqueConstraintViolation(ex))
+    {
+        return Results.Conflict(new { error = "Name or email already in use" });
+    }
     return rows == 0 ? Results.NotFound() : Results.Ok(new { id });
 }).RequireAuthorization();
 
@@ -543,17 +613,17 @@ app.MapPost("/api/users/{id:int}/reset-password", async (HttpContext http, int i
     if (!http.User.IsInRole("Admin")) return Results.Forbid();
     var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(http.Request.Body);
     var password = body != null && body.TryGetValue("password", out var p) ? p : null;
-    if (string.IsNullOrWhiteSpace(password) || password.Length < 6)
-        return Results.BadRequest(new { error = "Password must be at least 6 characters" });
+    if (string.IsNullOrWhiteSpace(password) || password.Length < 12)
+        return Results.BadRequest(new { error = "Password must be at least 12 characters" });
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
 
     string? adSam = null;
     string? adUpn = null;
     using (var sel = conn.CreateCommand())
     {
-        sel.CommandText = "SELECT ADSamAccountName, ADUserPrincipalName FROM Users WHERE Id = $id";
-        sel.Parameters.AddWithValue("$id", id);
+        sel.CommandText = "SELECT ADSamAccountName, ADUserPrincipalName FROM Users WHERE Id = @id";
+        sel.Parameters.AddWithValue("@id", id);
         using var rdr = sel.ExecuteReader();
         if (!rdr.Read()) return Results.NotFound();
         adSam = rdr.IsDBNull(0) ? null : rdr.GetString(0);
@@ -574,16 +644,16 @@ app.MapPost("/api/users/{id:int}/reset-password", async (HttpContext http, int i
         }
 
         using var clear = conn.CreateCommand();
-        clear.CommandText = "UPDATE Users SET PasswordHash = NULL WHERE Id = $id";
-        clear.Parameters.AddWithValue("$id", id);
+        clear.CommandText = "UPDATE Users SET PasswordHash = NULL WHERE Id = @id";
+        clear.Parameters.AddWithValue("@id", id);
         clear.ExecuteNonQuery();
         return Results.Ok(new { id, activeDirectory = true });
     }
 
     using var cmd = conn.CreateCommand();
-    cmd.CommandText = "UPDATE Users SET PasswordHash = $ph WHERE Id = $id";
-    cmd.Parameters.AddWithValue("$ph", DbHelpers.CreatePasswordHash(password));
-    cmd.Parameters.AddWithValue("$id", id);
+    cmd.CommandText = "UPDATE Users SET PasswordHash = @ph WHERE Id = @id";
+    cmd.Parameters.AddWithValue("@ph", DbHelpers.CreatePasswordHash(password));
+    cmd.Parameters.AddWithValue("@id", id);
     var rows = cmd.ExecuteNonQuery();
     return rows == 0 ? Results.NotFound() : Results.Ok(new { id, activeDirectory = false });
 }).RequireAuthorization();
@@ -609,7 +679,7 @@ app.MapPost("/api/users/{id:int}/status", async (HttpContext http, int id, Activ
             return Results.BadRequest(new { error = "Vous ne pouvez pas desactiver votre propre compte." });
     }
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
 
     string? name;
     string? email;
@@ -618,8 +688,8 @@ app.MapPost("/api/users/{id:int}/status", async (HttpContext http, int id, Activ
     string? adUpn;
     using (var sel = conn.CreateCommand())
     {
-        sel.CommandText = "SELECT Name, Email, Role, ADSamAccountName, ADUserPrincipalName FROM Users WHERE Id = $id";
-        sel.Parameters.AddWithValue("$id", id);
+        sel.CommandText = "SELECT Name, Email, Role, ADSamAccountName, ADUserPrincipalName FROM Users WHERE Id = @id";
+        sel.Parameters.AddWithValue("@id", id);
         using var rdr = sel.ExecuteReader();
         if (!rdr.Read()) return Results.NotFound();
         name = rdr.IsDBNull(0) ? null : rdr.GetString(0);
@@ -632,8 +702,8 @@ app.MapPost("/api/users/{id:int}/status", async (HttpContext http, int id, Activ
     if (!enabled && role == "Admin")
     {
         using var count = conn.CreateCommand();
-        count.CommandText = "SELECT COUNT(1) FROM Users WHERE Role = 'Admin' AND COALESCE(AccountEnabled, 1) = 1 AND Id <> $id";
-        count.Parameters.AddWithValue("$id", id);
+        count.CommandText = "SELECT COUNT(1) FROM Users WHERE Role = 'Admin' AND COALESCE(AccountEnabled, 1) = 1 AND Id <> @id";
+        count.Parameters.AddWithValue("@id", id);
         if (Convert.ToInt32(count.ExecuteScalar() ?? 0) <= 0)
             return Results.BadRequest(new { error = "Impossible de desactiver le dernier admin actif." });
     }
@@ -657,25 +727,25 @@ app.MapPost("/api/users/{id:int}/status", async (HttpContext http, int id, Activ
 
     using (var upd = conn.CreateCommand())
     {
-        upd.CommandText = "UPDATE Users SET AccountEnabled = $enabled WHERE Id = $id";
-        upd.Parameters.AddWithValue("$enabled", enabled ? 1 : 0);
-        upd.Parameters.AddWithValue("$id", id);
+        upd.CommandText = "UPDATE Users SET AccountEnabled = @enabled WHERE Id = @id";
+        upd.Parameters.AddWithValue("@enabled", enabled ? 1 : 0);
+        upd.Parameters.AddWithValue("@id", id);
         upd.ExecuteNonQuery();
     }
 
-    DbHelpers.WriteAudit(GetDbPath(), http.User?.Identity?.Name, enabled ? "UserEnable" : "UserDisable", $"User#{id}", $"{name ?? email ?? id.ToString()}");
+    DbHelpers.WriteAudit(GetConnectionString(), http.User?.Identity?.Name, enabled ? "UserEnable" : "UserDisable", $"User#{id}", $"{name ?? email ?? id.ToString()}");
     return Results.Ok(new { id, accountEnabled = enabled, activeDirectory = isAdLinked });
 }).RequireAuthorization();
 
 app.MapDelete("/api/users/{id:int}", (HttpContext http, int id) =>
 {
     if (!http.User.IsInRole("Admin")) return Results.Forbid();
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
 
     using (var chk = conn.CreateCommand())
     {
-        chk.CommandText = "SELECT Role, COALESCE(AccountEnabled, 1) FROM Users WHERE Id = $id";
-        chk.Parameters.AddWithValue("$id", id);
+        chk.CommandText = "SELECT Role, COALESCE(AccountEnabled, 1) FROM Users WHERE Id = @id";
+        chk.Parameters.AddWithValue("@id", id);
         using var rdr = chk.ExecuteReader();
         if (!rdr.Read()) return Results.NotFound();
         var r = rdr.IsDBNull(0) ? null : rdr.GetString(0);
@@ -683,16 +753,16 @@ app.MapDelete("/api/users/{id:int}", (HttpContext http, int id) =>
         if (r == "Admin" && isEnabled)
         {
             using var cnt = conn.CreateCommand();
-            cnt.CommandText = "SELECT COUNT(1) FROM Users WHERE Role = 'Admin' AND COALESCE(AccountEnabled, 1) = 1 AND Id <> $id";
-            cnt.Parameters.AddWithValue("$id", id);
+            cnt.CommandText = "SELECT COUNT(1) FROM Users WHERE Role = 'Admin' AND COALESCE(AccountEnabled, 1) = 1 AND Id <> @id";
+            cnt.Parameters.AddWithValue("@id", id);
             if (Convert.ToInt32(cnt.ExecuteScalar() ?? 0) <= 0)
                 return Results.BadRequest(new { error = "Cannot delete the last admin" });
         }
     }
 
     using var cmd = conn.CreateCommand();
-    cmd.CommandText = "DELETE FROM Users WHERE Id = $id";
-    cmd.Parameters.AddWithValue("$id", id);
+    cmd.CommandText = "DELETE FROM Users WHERE Id = @id";
+    cmd.Parameters.AddWithValue("@id", id);
     var rows = cmd.ExecuteNonQuery();
     return rows == 0 ? Results.NotFound() : Results.NoContent();
 }).RequireAuthorization();
@@ -703,7 +773,7 @@ app.MapDelete("/api/users/{id:int}", (HttpContext http, int id) =>
 app.MapGet("/api/reservations/all", (HttpContext http, string? status, string? from, string? to) =>
 {
     if (!(http.User.IsInRole("Admin") || http.User.IsInRole("Comptabilite"))) return Results.Forbid();
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using var cmd = conn.CreateCommand();
     var sql = @"SELECT r.ID, r.Date, r.StartHour, r.Hours, r.Status, r.Total_Amount,
                        u.Id, u.Name, u.Email,
@@ -714,9 +784,9 @@ app.MapGet("/api/reservations/all", (HttpContext http, string? status, string? f
                 LEFT JOIN Spaces s ON s.ID = r.SpaceId
                 LEFT JOIN Facture f ON f.ReservationId = r.ID
                 WHERE 1=1";
-    if (!string.IsNullOrWhiteSpace(status)) { sql += " AND r.Status = $st"; cmd.Parameters.AddWithValue("$st", status); }
-    if (!string.IsNullOrWhiteSpace(from)) { sql += " AND r.Date >= $from"; cmd.Parameters.AddWithValue("$from", from); }
-    if (!string.IsNullOrWhiteSpace(to)) { sql += " AND r.Date <= $to"; cmd.Parameters.AddWithValue("$to", to); }
+    if (!string.IsNullOrWhiteSpace(status)) { sql += " AND r.Status = @st"; cmd.Parameters.AddWithValue("@st", status); }
+    if (!string.IsNullOrWhiteSpace(from)) { sql += " AND r.Date >= @from"; cmd.Parameters.AddWithValue("@from", from); }
+    if (!string.IsNullOrWhiteSpace(to)) { sql += " AND r.Date <= @to"; cmd.Parameters.AddWithValue("@to", to); }
     sql += " ORDER BY r.Date DESC, r.StartHour DESC";
     cmd.CommandText = sql;
 
@@ -749,7 +819,7 @@ app.MapGet("/api/reservations/all", (HttpContext http, string? status, string? f
 app.MapGet("/api/spaces", () =>
 {
     var list = new List<object>();
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using var cmd = conn.CreateCommand();
     cmd.CommandText = "SELECT ID, Name, Capacity, PricePerHour, Type FROM Spaces ORDER BY ID";
     using var rdr = cmd.ExecuteReader();
@@ -777,15 +847,15 @@ app.MapPost("/api/spaces", async (HttpContext http) =>
     var allowed = new[] { "Nomad", "Office", "Meeting", "Conference" };
     if (!allowed.Contains(type)) type = "Nomad";
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using var cmd = conn.CreateCommand();
-    cmd.CommandText = "INSERT INTO Spaces (Name, Capacity, PricePerHour, Type) VALUES ($name, $cap, $price, $type); SELECT last_insert_rowid();";
-    cmd.Parameters.AddWithValue("$name", name);
-    cmd.Parameters.AddWithValue("$cap", capacity);
-    cmd.Parameters.AddWithValue("$price", pricePerHour);
-    cmd.Parameters.AddWithValue("$type", type);
+    cmd.CommandText = "INSERT INTO Spaces (Name, Capacity, PricePerHour, Type) VALUES (@name, @cap, @price, @type) RETURNING ID;";
+    cmd.Parameters.AddWithValue("@name", name);
+    cmd.Parameters.AddWithValue("@cap", capacity);
+    cmd.Parameters.AddWithValue("@price", pricePerHour);
+    cmd.Parameters.AddWithValue("@type", type);
     var id = Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
-    DbHelpers.WriteAudit(GetDbPath(), http.User?.Identity?.Name, "SpaceCreate", $"Space#{id}", $"name={name},type={type}");
+    DbHelpers.WriteAudit(GetConnectionString(), http.User?.Identity?.Name, "SpaceCreate", $"Space#{id}", $"name={name},type={type}");
     return Results.Created($"/api/spaces/{id}", new { id, name, capacity, pricePerHour, type });
 }).RequireAuthorization();
 
@@ -793,13 +863,13 @@ app.MapDelete("/api/spaces/{id:int}", (HttpContext http, int id) =>
 {
     if (!http.User.IsInRole("Admin")) return Results.Forbid();
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using var cmd = conn.CreateCommand();
-    cmd.CommandText = "DELETE FROM Spaces WHERE ID = $id";
-    cmd.Parameters.AddWithValue("$id", id);
+    cmd.CommandText = "DELETE FROM Spaces WHERE ID = @id";
+    cmd.Parameters.AddWithValue("@id", id);
     var rows = cmd.ExecuteNonQuery();
     if (rows == 0) return Results.NotFound();
-    DbHelpers.WriteAudit(GetDbPath(), http.User?.Identity?.Name, "SpaceDelete", $"Space#{id}");
+    DbHelpers.WriteAudit(GetConnectionString(), http.User?.Identity?.Name, "SpaceDelete", $"Space#{id}");
     return Results.NoContent();
 }).RequireAuthorization();
 
@@ -810,10 +880,10 @@ app.MapGet("/api/spaces/{id:int}/resources", (HttpContext http, int id) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
     var list = new List<object>();
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using var cmd = conn.CreateCommand();
-    cmd.CommandText = "SELECT ID, Name_ressource, Type_ressources, Capacity, Price FROM Ressources WHERE SpaceId = $id ORDER BY ID";
-    cmd.Parameters.AddWithValue("$id", id);
+    cmd.CommandText = "SELECT ID, Name_ressource, Type_ressources, Capacity, Price FROM Ressources WHERE SpaceId = @id ORDER BY ID";
+    cmd.Parameters.AddWithValue("@id", id);
     using var rdr = cmd.ExecuteReader();
     while (rdr.Read())
         list.Add(new {
@@ -836,29 +906,29 @@ app.MapPost("/api/spaces/{id:int}/resources", async (HttpContext http, int id) =
     var qty = body.TryGetValue("quantity", out var q) && int.TryParse(q?.ToString(), out var qi) ? qi : 1;
     if (string.IsNullOrWhiteSpace(name)) return Results.BadRequest(new { error = "name required" });
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using var cmd = conn.CreateCommand();
-    cmd.CommandText = "INSERT INTO Ressources (Name_ressource, Type_ressources, Capacity, Price, SpaceId) VALUES ($n,$t,$q,$p,$s); SELECT last_insert_rowid();";
-    cmd.Parameters.AddWithValue("$n", name);
-    cmd.Parameters.AddWithValue("$t", type);
-    cmd.Parameters.AddWithValue("$q", qty);
-    cmd.Parameters.AddWithValue("$p", 0.0);
-    cmd.Parameters.AddWithValue("$s", id);
+    cmd.CommandText = "INSERT INTO Ressources (Name_ressource, Type_ressources, Capacity, Price, SpaceId) VALUES (@n,@t,@q,@p,@s) RETURNING ID;";
+    cmd.Parameters.AddWithValue("@n", name);
+    cmd.Parameters.AddWithValue("@t", type);
+    cmd.Parameters.AddWithValue("@q", qty);
+    cmd.Parameters.AddWithValue("@p", 0.0);
+    cmd.Parameters.AddWithValue("@s", id);
     var rid = Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
-    DbHelpers.WriteAudit(GetDbPath(), http.User?.Identity?.Name, "ResourceCreate", $"Resource#{rid}", $"space={id},name={name}");
+    DbHelpers.WriteAudit(GetConnectionString(), http.User?.Identity?.Name, "ResourceCreate", $"Resource#{rid}", $"space={id},name={name}");
     return Results.Created($"/api/resources/{rid}", new { id = rid, name, type, quantity = qty });
 }).RequireAuthorization();
 
 app.MapDelete("/api/resources/{id:int}", (HttpContext http, int id) =>
 {
     if (!http.User.IsInRole("Admin")) return Results.Forbid();
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using var cmd = conn.CreateCommand();
-    cmd.CommandText = "DELETE FROM Ressources WHERE ID = $id";
-    cmd.Parameters.AddWithValue("$id", id);
+    cmd.CommandText = "DELETE FROM Ressources WHERE ID = @id";
+    cmd.Parameters.AddWithValue("@id", id);
     var rows = cmd.ExecuteNonQuery();
     if (rows == 0) return Results.NotFound();
-    DbHelpers.WriteAudit(GetDbPath(), http.User?.Identity?.Name, "ResourceDelete", $"Resource#{id}");
+    DbHelpers.WriteAudit(GetConnectionString(), http.User?.Identity?.Name, "ResourceDelete", $"Resource#{id}");
     return Results.NoContent();
 }).RequireAuthorization();
 
@@ -900,7 +970,7 @@ app.MapPost("/api/reservations", async (HttpContext http, InvoiceService invoice
     var start = DateTime.SpecifyKind(date.AddHours(startHour), DateTimeKind.Utc);
     var end = start.AddHours(hours);
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     var adCheck = EnsureAdLinkedForBooking(http, conn, adService);
     if (adCheck != null) return adCheck;
 
@@ -910,8 +980,8 @@ app.MapPost("/api/reservations", async (HttpContext http, InvoiceService invoice
     int spaceCapacity = 0;
     using (var sc = conn.CreateCommand())
     {
-        sc.CommandText = "SELECT Name, PricePerHour, Capacity FROM Spaces WHERE ID = $id LIMIT 1";
-        sc.Parameters.AddWithValue("$id", spaceId);
+        sc.CommandText = "SELECT Name, PricePerHour, Capacity FROM Spaces WHERE ID = @id LIMIT 1";
+        sc.Parameters.AddWithValue("@id", spaceId);
         using var sr = sc.ExecuteReader();
         if (!sr.Read()) return Results.BadRequest(new { error = "Unknown space" });
         spaceName = sr.IsDBNull(0) ? string.Empty : sr.GetString(0);
@@ -924,35 +994,17 @@ app.MapPost("/api/reservations", async (HttpContext http, InvoiceService invoice
     if (spaceCapacity > 0 && partySize > spaceCapacity)
         return Results.BadRequest(new { error = $"This space only fits {spaceCapacity} ({partySize} requested)" });
 
-    // Resolve current user to DB OwnerId
-    var currentName = http.User?.Identity?.Name ?? string.Empty;
-    int ownerId;
-    using (var ucmd = conn.CreateCommand())
-    {
-        ucmd.CommandText = "SELECT Id FROM Users WHERE Name = $n OR Email = $n LIMIT 1";
-        ucmd.Parameters.AddWithValue("$n", currentName);
-        ownerId = Convert.ToInt32(ucmd.ExecuteScalar() ?? 0);
-    }
-
-    if (ownerId == 0)
-    {
-        using var create = conn.CreateCommand();
-        create.CommandText = "INSERT INTO Users (Name, Email, Role, PasswordHash) VALUES ($n,$e,$r,$ph); SELECT last_insert_rowid();";
-        create.Parameters.AddWithValue("$n", currentName);
-        var email = currentName.Contains("@") ? currentName : string.Empty;
-        create.Parameters.AddWithValue("$e", string.IsNullOrEmpty(email) ? (object)DBNull.Value : email);
-        create.Parameters.AddWithValue("$r", "User");
-        create.Parameters.AddWithValue("$ph", DBNull.Value);
-        ownerId = Convert.ToInt32(create.ExecuteScalar() ?? 0);
-    }
+    // Resolve current user to DB OwnerId from the authenticated Id claim (never Name/Email — not unique)
+    var ownerId = CurrentUserId(http) ?? 0;
+    if (ownerId == 0) return Results.Unauthorized();
 
     // Check for conflicts
     using (var chk = conn.CreateCommand())
     {
-        chk.CommandText = "SELECT COUNT(1) FROM Reservation WHERE SpaceId = $sp AND Status = 'Booked' AND NOT (Ending_Date <= $s OR Starting_Date >= $e)";
-        chk.Parameters.AddWithValue("$sp", spaceId);
-        chk.Parameters.AddWithValue("$s", start.ToString("o"));
-        chk.Parameters.AddWithValue("$e", end.ToString("o"));
+        chk.CommandText = "SELECT COUNT(1) FROM Reservation WHERE SpaceId = @sp AND Status = 'Booked' AND NOT (Ending_Date <= @s OR Starting_Date >= @e)";
+        chk.Parameters.AddWithValue("@sp", spaceId);
+        chk.Parameters.AddWithValue("@s", start.ToString("o"));
+        chk.Parameters.AddWithValue("@e", end.ToString("o"));
         if (Convert.ToInt32(chk.ExecuteScalar() ?? 0) > 0)
             return Results.Conflict(new { error = "Time slot already booked for this space" });
     }
@@ -961,21 +1013,21 @@ app.MapPost("/api/reservations", async (HttpContext http, InvoiceService invoice
     var token = QrService.NewToken();
     using (var ins = conn.CreateCommand())
     {
-        ins.CommandText = "INSERT INTO Reservation (OwnerId, SpaceId, Starting_Date, Ending_Date, Date, StartHour, Hours, Status, Total_Amount, Attendees, AccessToken) VALUES ($o,$sp,$s,$e,$d,$sh,$h,$st,$t,$at,$tok); SELECT last_insert_rowid();";
-        ins.Parameters.AddWithValue("$o", ownerId);
-        ins.Parameters.AddWithValue("$sp", spaceId);
-        ins.Parameters.AddWithValue("$s", start.ToString("o"));
-        ins.Parameters.AddWithValue("$e", end.ToString("o"));
-        ins.Parameters.AddWithValue("$d", date.ToString("yyyy-MM-dd"));
-        ins.Parameters.AddWithValue("$sh", startHour);
-        ins.Parameters.AddWithValue("$h", hours);
-        ins.Parameters.AddWithValue("$st", "Booked");
-        ins.Parameters.AddWithValue("$t", totalHT);
-        ins.Parameters.AddWithValue("$at", string.IsNullOrEmpty(attendeesStr) ? (object)DBNull.Value : attendeesStr);
-        ins.Parameters.AddWithValue("$tok", token);
+        ins.CommandText = "INSERT INTO Reservation (OwnerId, SpaceId, Starting_Date, Ending_Date, Date, StartHour, Hours, Status, Total_Amount, Attendees, AccessToken) VALUES (@o,@sp,@s,@e,@d,@sh,@h,@st,@t,@at,@tok) RETURNING ID;";
+        ins.Parameters.AddWithValue("@o", ownerId);
+        ins.Parameters.AddWithValue("@sp", spaceId);
+        ins.Parameters.AddWithValue("@s", start.ToString("o"));
+        ins.Parameters.AddWithValue("@e", end.ToString("o"));
+        ins.Parameters.AddWithValue("@d", date.ToString("yyyy-MM-dd"));
+        ins.Parameters.AddWithValue("@sh", startHour);
+        ins.Parameters.AddWithValue("@h", hours);
+        ins.Parameters.AddWithValue("@st", "Booked");
+        ins.Parameters.AddWithValue("@t", totalHT);
+        ins.Parameters.AddWithValue("@at", string.IsNullOrEmpty(attendeesStr) ? (object)DBNull.Value : attendeesStr);
+        ins.Parameters.AddWithValue("@tok", token);
         id = Convert.ToInt32(ins.ExecuteScalar() ?? 0);
     }
-    DbHelpers.WriteAudit(GetDbPath(), http.User?.Identity?.Name, "BookingCreate", $"Reservation#{id}", $"space={spaceName},date={date:yyyy-MM-dd},start={startHour},hours={hours}");
+    DbHelpers.WriteAudit(GetConnectionString(), http.User?.Identity?.Name, "BookingCreate", $"Reservation#{id}", $"space={spaceName},date={date:yyyy-MM-dd},start={startHour},hours={hours}");
 
     // Generate invoice + send email (failures don't roll back the booking — log only)
     string invoiceNumber = string.Empty;
@@ -1012,15 +1064,10 @@ app.MapPost("/api/reservations", async (HttpContext http, InvoiceService invoice
 app.MapGet("/api/reservations/mine", (HttpContext http) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
-    var name = http.User?.Identity?.Name ?? string.Empty;
-
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
-    using var uc = conn.CreateCommand();
-    uc.CommandText = "SELECT Id FROM Users WHERE Name = $n OR Email = $n LIMIT 1";
-    uc.Parameters.AddWithValue("$n", name);
-    var ownerId = Convert.ToInt32(uc.ExecuteScalar() ?? 0);
+    var ownerId = CurrentUserId(http) ?? 0;
     if (ownerId == 0) return Results.Ok(Array.Empty<object>());
 
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     var list = new List<object>();
     using var cmd = conn.CreateCommand();
     cmd.CommandText = @"SELECT r.ID, r.Date, r.StartHour, r.Hours, r.Status, r.Total_Amount,
@@ -1030,9 +1077,9 @@ app.MapGet("/api/reservations/mine", (HttpContext http) =>
                         FROM Reservation r
                         LEFT JOIN Spaces s ON r.SpaceId = s.ID
                         LEFT JOIN Facture f ON f.ReservationId = r.ID
-                        WHERE r.OwnerId = $oid
+                        WHERE r.OwnerId = @oid
                         ORDER BY r.Date DESC, r.StartHour DESC";
-    cmd.Parameters.AddWithValue("$oid", ownerId);
+    cmd.Parameters.AddWithValue("@oid", ownerId);
     using var rdr = cmd.ExecuteReader();
     while (rdr.Read())
     {
@@ -1061,16 +1108,9 @@ app.MapDelete("/api/reservations/{id:int}", (HttpContext http, int id, EmailServ
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
     var name = http.User?.Identity?.Name ?? string.Empty;
+    var ownerId = CurrentUserId(http) ?? 0;
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
-
-    int ownerId;
-    using (var uc = conn.CreateCommand())
-    {
-        uc.CommandText = "SELECT Id FROM Users WHERE Name = $n OR Email = $n LIMIT 1";
-        uc.Parameters.AddWithValue("$n", name);
-        ownerId = Convert.ToInt32(uc.ExecuteScalar() ?? 0);
-    }
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
 
     var isAdmin = http.User?.IsInRole("Admin") == true;
 
@@ -1082,8 +1122,8 @@ app.MapDelete("/api/reservations/{id:int}", (HttpContext http, int id, EmailServ
                             FROM Reservation r
                             LEFT JOIN Users u ON u.Id = r.OwnerId
                             LEFT JOIN Spaces s ON s.ID = r.SpaceId
-                            WHERE r.ID = $id LIMIT 1";
-        chk.Parameters.AddWithValue("$id", id);
+                            WHERE r.ID = @id LIMIT 1";
+        chk.Parameters.AddWithValue("@id", id);
         using var rdr = chk.ExecuteReader();
         if (!rdr.Read()) return Results.NotFound();
         ownerOfRes = rdr.GetInt32(0);
@@ -1100,20 +1140,20 @@ app.MapDelete("/api/reservations/{id:int}", (HttpContext http, int id, EmailServ
 
     using (var upd = conn.CreateCommand())
     {
-        upd.CommandText = "UPDATE Reservation SET Status = 'Cancelled' WHERE ID = $id";
-        upd.Parameters.AddWithValue("$id", id);
+        upd.CommandText = "UPDATE Reservation SET Status = 'Cancelled' WHERE ID = @id";
+        upd.Parameters.AddWithValue("@id", id);
         upd.ExecuteNonQuery();
     }
 
     string? invNum = null;
     using (var fact = conn.CreateCommand())
     {
-        fact.CommandText = "UPDATE Facture SET Payment_Status = 'Cancelled' WHERE ReservationId = $id RETURNING Num_facture";
-        fact.Parameters.AddWithValue("$id", id);
+        fact.CommandText = "UPDATE Facture SET Payment_Status = 'Cancelled' WHERE ReservationId = @id RETURNING Num_facture";
+        fact.Parameters.AddWithValue("@id", id);
         invNum = fact.ExecuteScalar() as string;
     }
 
-    DbHelpers.WriteAudit(GetDbPath(), name, "BookingCancel", $"Reservation#{id}");
+    DbHelpers.WriteAudit(GetConnectionString(), name, "BookingCancel", $"Reservation#{id}");
 
     if (!string.IsNullOrWhiteSpace(ownerEmail) && !string.IsNullOrWhiteSpace(dateStr))
     {
@@ -1132,7 +1172,7 @@ app.MapPut("/api/reservations/{id:int}", async (HttpContext http, int id, EmailS
     var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, object>>(http.Request.Body);
     if (body == null) return Results.BadRequest(new { error = "Invalid payload" });
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
 
     int ownerOfRes, currentSpaceId, currentStartHour, currentHours;
     string currentDate, currentStatus;
@@ -1145,8 +1185,8 @@ app.MapPut("/api/reservations/{id:int}", async (HttpContext http, int id, EmailS
                             FROM Reservation r
                             LEFT JOIN Users u ON u.Id = r.OwnerId
                             LEFT JOIN Spaces s ON s.ID = r.SpaceId
-                            WHERE r.ID = $id LIMIT 1";
-        chk.Parameters.AddWithValue("$id", id);
+                            WHERE r.ID = @id LIMIT 1";
+        chk.Parameters.AddWithValue("@id", id);
         using var rdr = chk.ExecuteReader();
         if (!rdr.Read()) return Results.NotFound();
         ownerOfRes = rdr.GetInt32(0);
@@ -1161,13 +1201,7 @@ app.MapPut("/api/reservations/{id:int}", async (HttpContext http, int id, EmailS
         pricePerHour = rdr.IsDBNull(9) ? 0.0 : rdr.GetDouble(9);
     }
 
-    int ownerId;
-    using (var uc = conn.CreateCommand())
-    {
-        uc.CommandText = "SELECT Id FROM Users WHERE Name = $n OR Email = $n LIMIT 1";
-        uc.Parameters.AddWithValue("$n", name);
-        ownerId = Convert.ToInt32(uc.ExecuteScalar() ?? 0);
-    }
+    var ownerId = CurrentUserId(http) ?? 0;
     var isAdmin = http.User?.IsInRole("Admin") == true;
     if (!isAdmin && ownerOfRes != ownerId) return Results.Forbid();
     if (currentStatus == "Cancelled") return Results.BadRequest(new { error = "Cannot modify a cancelled reservation" });
@@ -1184,30 +1218,30 @@ app.MapPut("/api/reservations/{id:int}", async (HttpContext http, int id, EmailS
     // conflict check (exclude self)
     using (var ch = conn.CreateCommand())
     {
-        ch.CommandText = "SELECT COUNT(1) FROM Reservation WHERE SpaceId = $sp AND ID <> $id AND Status = 'Booked' AND NOT (Ending_Date <= $s OR Starting_Date >= $e)";
-        ch.Parameters.AddWithValue("$sp", currentSpaceId);
-        ch.Parameters.AddWithValue("$id", id);
-        ch.Parameters.AddWithValue("$s", dt.ToString("o"));
-        ch.Parameters.AddWithValue("$e", endDt.ToString("o"));
+        ch.CommandText = "SELECT COUNT(1) FROM Reservation WHERE SpaceId = @sp AND ID <> @id AND Status = 'Booked' AND NOT (Ending_Date <= @s OR Starting_Date >= @e)";
+        ch.Parameters.AddWithValue("@sp", currentSpaceId);
+        ch.Parameters.AddWithValue("@id", id);
+        ch.Parameters.AddWithValue("@s", dt.ToString("o"));
+        ch.Parameters.AddWithValue("@e", endDt.ToString("o"));
         if (Convert.ToInt32(ch.ExecuteScalar() ?? 0) > 0) return Results.Conflict(new { error = "Time slot already booked" });
     }
 
     var totalHT = Math.Round(pricePerHour * newHours, 2);
     using (var upd = conn.CreateCommand())
     {
-        upd.CommandText = @"UPDATE Reservation SET Date=$d, StartHour=$sh, Hours=$h, Starting_Date=$sd, Ending_Date=$ed, Total_Amount=$tot
-                            WHERE ID = $id";
-        upd.Parameters.AddWithValue("$d", newDate);
-        upd.Parameters.AddWithValue("$sh", newStart);
-        upd.Parameters.AddWithValue("$h", newHours);
-        upd.Parameters.AddWithValue("$sd", dt.ToString("o"));
-        upd.Parameters.AddWithValue("$ed", endDt.ToString("o"));
-        upd.Parameters.AddWithValue("$tot", totalHT);
-        upd.Parameters.AddWithValue("$id", id);
+        upd.CommandText = @"UPDATE Reservation SET Date=@d, StartHour=@sh, Hours=@h, Starting_Date=@sd, Ending_Date=@ed, Total_Amount=@tot
+                            WHERE ID = @id";
+        upd.Parameters.AddWithValue("@d", newDate);
+        upd.Parameters.AddWithValue("@sh", newStart);
+        upd.Parameters.AddWithValue("@h", newHours);
+        upd.Parameters.AddWithValue("@sd", dt.ToString("o"));
+        upd.Parameters.AddWithValue("@ed", endDt.ToString("o"));
+        upd.Parameters.AddWithValue("@tot", totalHT);
+        upd.Parameters.AddWithValue("@id", id);
         upd.ExecuteNonQuery();
     }
 
-    DbHelpers.WriteAudit(GetDbPath(), name, "BookingModify", $"Reservation#{id}", $"date={newDate},start={newStart},hours={newHours}");
+    DbHelpers.WriteAudit(GetConnectionString(), name, "BookingModify", $"Reservation#{id}", $"date={newDate},start={newStart},hours={newHours}");
 
     if (!string.IsNullOrWhiteSpace(ownerEmail))
         _ = Task.Run(() => emailSvc.SendBookingModifiedAsync(ownerEmail, ownerName ?? "", spaceName ?? "", dt, newHours));
@@ -1227,29 +1261,13 @@ app.MapPost("/api/cart/checkout", async (HttpContext http, InvoiceService invoic
     if (!root.TryGetProperty("items", out var items) || items.ValueKind != System.Text.Json.JsonValueKind.Array || items.GetArrayLength() == 0)
         return Results.BadRequest(new { error = "Cart is empty" });
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     var adCheck = EnsureAdLinkedForBooking(http, conn, adService);
     if (adCheck != null) return adCheck;
 
     var currentName = http.User?.Identity?.Name ?? string.Empty;
-    int ownerId;
-    using (var ucmd = conn.CreateCommand())
-    {
-        ucmd.CommandText = "SELECT Id FROM Users WHERE Name = $n OR Email = $n LIMIT 1";
-        ucmd.Parameters.AddWithValue("$n", currentName);
-        ownerId = Convert.ToInt32(ucmd.ExecuteScalar() ?? 0);
-    }
-    if (ownerId == 0)
-    {
-        using var create = conn.CreateCommand();
-        create.CommandText = "INSERT INTO Users (Name, Email, Role, PasswordHash) VALUES ($n,$e,$r,$ph); SELECT last_insert_rowid();";
-        create.Parameters.AddWithValue("$n", currentName);
-        var em = currentName.Contains('@') ? currentName : string.Empty;
-        create.Parameters.AddWithValue("$e", string.IsNullOrEmpty(em) ? (object)DBNull.Value : em);
-        create.Parameters.AddWithValue("$r", "User");
-        create.Parameters.AddWithValue("$ph", DBNull.Value);
-        ownerId = Convert.ToInt32(create.ExecuteScalar() ?? 0);
-    }
+    var ownerId = CurrentUserId(http) ?? 0;
+    if (ownerId == 0) return Results.Unauthorized();
 
     var created = new List<int>();
     var spaceNames = new Dictionary<int, string>();
@@ -1271,8 +1289,8 @@ app.MapPost("/api/cart/checkout", async (HttpContext http, InvoiceService invoic
         if (!spacePrices.ContainsKey(spId))
         {
             using var sc = conn.CreateCommand();
-            sc.CommandText = "SELECT Name, PricePerHour FROM Spaces WHERE ID = $id LIMIT 1";
-            sc.Parameters.AddWithValue("$id", spId);
+            sc.CommandText = "SELECT Name, PricePerHour FROM Spaces WHERE ID = @id LIMIT 1";
+            sc.Parameters.AddWithValue("@id", spId);
             using var sr = sc.ExecuteReader();
             if (!sr.Read()) continue;
             spaceNames[spId] = sr.IsDBNull(0) ? "" : sr.GetString(0);
@@ -1281,10 +1299,10 @@ app.MapPost("/api/cart/checkout", async (HttpContext http, InvoiceService invoic
 
         using (var ch = conn.CreateCommand())
         {
-            ch.CommandText = "SELECT COUNT(1) FROM Reservation WHERE SpaceId = $sp AND Status = 'Booked' AND NOT (Ending_Date <= $s OR Starting_Date >= $e)";
-            ch.Parameters.AddWithValue("$sp", spId);
-            ch.Parameters.AddWithValue("$s", start.ToString("o"));
-            ch.Parameters.AddWithValue("$e", end.ToString("o"));
+            ch.CommandText = "SELECT COUNT(1) FROM Reservation WHERE SpaceId = @sp AND Status = 'Booked' AND NOT (Ending_Date <= @s OR Starting_Date >= @e)";
+            ch.Parameters.AddWithValue("@sp", spId);
+            ch.Parameters.AddWithValue("@s", start.ToString("o"));
+            ch.Parameters.AddWithValue("@e", end.ToString("o"));
             if (Convert.ToInt32(ch.ExecuteScalar() ?? 0) > 0)
                 return Results.Conflict(new { error = $"Conflict for {spaceNames[spId]} {dateStr} {sh}:00" });
         }
@@ -1292,22 +1310,22 @@ app.MapPost("/api/cart/checkout", async (HttpContext http, InvoiceService invoic
         var lineHT = Math.Round(spacePrices[spId] * hr, 2);
         var token = QrService.NewToken();
         using var ins = conn.CreateCommand();
-        ins.CommandText = "INSERT INTO Reservation (OwnerId, SpaceId, Starting_Date, Ending_Date, Date, StartHour, Hours, Status, Total_Amount, AccessToken) VALUES ($o,$sp,$s,$e,$d,$sh,$h,'Booked',$t,$tok); SELECT last_insert_rowid();";
-        ins.Parameters.AddWithValue("$o", ownerId);
-        ins.Parameters.AddWithValue("$sp", spId);
-        ins.Parameters.AddWithValue("$s", start.ToString("o"));
-        ins.Parameters.AddWithValue("$e", end.ToString("o"));
-        ins.Parameters.AddWithValue("$d", dateStr);
-        ins.Parameters.AddWithValue("$sh", sh);
-        ins.Parameters.AddWithValue("$h", hr);
-        ins.Parameters.AddWithValue("$t", lineHT);
-        ins.Parameters.AddWithValue("$tok", token);
+        ins.CommandText = "INSERT INTO Reservation (OwnerId, SpaceId, Starting_Date, Ending_Date, Date, StartHour, Hours, Status, Total_Amount, AccessToken) VALUES (@o,@sp,@s,@e,@d,@sh,@h,'Booked',@t,@tok) RETURNING ID;";
+        ins.Parameters.AddWithValue("@o", ownerId);
+        ins.Parameters.AddWithValue("@sp", spId);
+        ins.Parameters.AddWithValue("@s", start.ToString("o"));
+        ins.Parameters.AddWithValue("@e", end.ToString("o"));
+        ins.Parameters.AddWithValue("@d", dateStr);
+        ins.Parameters.AddWithValue("@sh", sh);
+        ins.Parameters.AddWithValue("@h", hr);
+        ins.Parameters.AddWithValue("@t", lineHT);
+        ins.Parameters.AddWithValue("@tok", token);
         var rid = Convert.ToInt32(ins.ExecuteScalar() ?? 0);
         created.Add(rid);
     }
 
     if (created.Count == 0) return Results.BadRequest(new { error = "No valid items" });
-    DbHelpers.WriteAudit(GetDbPath(), currentName, "CartCheckout", $"Reservations={string.Join(",", created)}");
+    DbHelpers.WriteAudit(GetConnectionString(), currentName, "CartCheckout", $"Reservations={string.Join(",", created)}");
 
     string invoiceNumber = string.Empty;
     double totalTtc = 0;
@@ -1347,24 +1365,20 @@ app.MapPost("/api/cart/checkout", async (HttpContext http, InvoiceService invoic
 app.MapGet("/api/reservations/{id:int}/qr", (HttpContext http, int id) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using var cmd = conn.CreateCommand();
-    cmd.CommandText = "SELECT r.OwnerId, r.AccessToken FROM Reservation r WHERE r.ID = $id";
-    cmd.Parameters.AddWithValue("$id", id);
+    cmd.CommandText = "SELECT r.OwnerId, r.AccessToken FROM Reservation r WHERE r.ID = @id";
+    cmd.Parameters.AddWithValue("@id", id);
     using var rdr = cmd.ExecuteReader();
     if (!rdr.Read()) return Results.NotFound();
     var owner = rdr.GetInt32(0);
     var token = rdr.IsDBNull(1) ? null : rdr.GetString(1);
     rdr.Close();
     if (string.IsNullOrEmpty(token)) return Results.NotFound();
-    var name = http.User?.Identity?.Name ?? "";
     var isAdmin = http.User?.IsInRole("Admin") == true;
     if (!isAdmin)
     {
-        using var uc = conn.CreateCommand();
-        uc.CommandText = "SELECT Id FROM Users WHERE Name = $n OR Email = $n LIMIT 1";
-        uc.Parameters.AddWithValue("$n", name);
-        var uid = Convert.ToInt32(uc.ExecuteScalar() ?? 0);
+        var uid = CurrentUserId(http) ?? 0;
         if (uid != owner) return Results.Forbid();
     }
     var png = QrService.GeneratePng(token, 10);
@@ -1379,18 +1393,18 @@ app.MapPost("/api/access/verify", async (HttpContext http) =>
     var token = body != null && body.TryGetValue("token", out var t) ? t : null;
     if (string.IsNullOrWhiteSpace(token)) return Results.BadRequest(new { error = "token required" });
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using var cmd = conn.CreateCommand();
     cmd.CommandText = @"SELECT r.ID, r.Date, r.StartHour, r.Hours, r.Status, u.Name, s.Name
                         FROM Reservation r
                         LEFT JOIN Users u ON u.Id = r.OwnerId
                         LEFT JOIN Spaces s ON s.ID = r.SpaceId
-                        WHERE r.AccessToken = $tok LIMIT 1";
-    cmd.Parameters.AddWithValue("$tok", token);
+                        WHERE r.AccessToken = @tok LIMIT 1";
+    cmd.Parameters.AddWithValue("@tok", token);
     using var rdr = cmd.ExecuteReader();
     if (!rdr.Read())
     {
-        DbHelpers.WriteAudit(GetDbPath(), http.User?.Identity?.Name, "AccessDenied", null, "unknown token");
+        DbHelpers.WriteAudit(GetConnectionString(), http.User?.Identity?.Name, "AccessDenied", null, "unknown token");
         return Results.Ok(new { granted = false, reason = "Unknown QR" });
     }
     var rid = rdr.GetInt32(0);
@@ -1407,17 +1421,17 @@ app.MapPost("/api/access/verify", async (HttpContext http) =>
     var now = DateTime.UtcNow;
     var grantWindow = TimeSpan.FromMinutes(15);
     var granted = st == "Booked" && now >= start.Subtract(grantWindow) && now <= end;
-    DbHelpers.WriteAudit(GetDbPath(), http.User?.Identity?.Name, granted ? "AccessGranted" : "AccessDenied", $"Reservation#{rid}");
+    DbHelpers.WriteAudit(GetConnectionString(), http.User?.Identity?.Name, granted ? "AccessGranted" : "AccessDenied", $"Reservation#{rid}");
     return Results.Ok(new { granted, owner, space, start, end, status = st });
 }).RequireAuthorization();
 
-// --- Audit log + Backup ---
+// --- Audit log ---
 
 app.MapGet("/api/admin/audit", (HttpContext http, int? limit) =>
 {
     if (!http.User.IsInRole("Admin")) return Results.Forbid();
     var lim = limit.GetValueOrDefault(200);
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using var cmd = conn.CreateCommand();
     cmd.CommandText = $"SELECT Timestamp, UserName, Action, Target, Details FROM AuditLog ORDER BY Id DESC LIMIT {Math.Clamp(lim, 1, 1000)}";
     var list = new List<object>();
@@ -1435,45 +1449,13 @@ app.MapGet("/api/admin/audit", (HttpContext http, int? limit) =>
     return Results.Ok(list);
 }).RequireAuthorization();
 
-app.MapGet("/api/admin/backup", (HttpContext http) =>
-{
-    if (!http.User.IsInRole("Admin")) return Results.Forbid();
-    var dbPath = GetDbPath();
-    if (!File.Exists(dbPath)) return Results.NotFound();
-    DbHelpers.WriteAudit(dbPath, http.User?.Identity?.Name, "BackupDownload");
-
-    var tmp = Path.Combine(Path.GetTempPath(), $"app-backup-{Guid.NewGuid():N}.db");
-    try
-    {
-        using (var src = DbHelpers.OpenConnection(dbPath))
-        using (var dst = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = tmp }.ConnectionString))
-        {
-            dst.Open();
-            src.BackupDatabase(dst);
-            dst.Close();
-        }
-        SqliteConnection.ClearAllPools();
-        byte[] bytes;
-        using (var fs = new FileStream(tmp, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-        {
-            bytes = new byte[fs.Length];
-            int read = 0; while (read < bytes.Length) read += fs.Read(bytes, read, bytes.Length - read);
-        }
-        return Results.File(bytes, "application/octet-stream", $"app-backup-{DateTime.UtcNow:yyyyMMdd-HHmmss}.db");
-    }
-    finally
-    {
-        try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
-    }
-}).RequireAuthorization();
-
 // --- Enhanced dashboard stats ---
 
 // FONCTIONNALITE: statistiques du dashboard admin.
 app.MapGet("/api/admin/dashboard", (HttpContext http) =>
 {
     if (!(http.User.IsInRole("Admin") || http.User.IsInRole("Comptabilite"))) return Results.Forbid();
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
 
     int Count(string sql)
     {
@@ -1503,7 +1485,7 @@ app.MapGet("/api/admin/dashboard", (HttpContext http) =>
     }
 
     var totalSpaces = Count("SELECT COUNT(1) FROM Spaces");
-    var totalHoursThisWeek = Sum("SELECT COALESCE(SUM(Hours),0) FROM Reservation WHERE Status='Booked' AND Date >= date('now','-7 days')");
+    var totalHoursThisWeek = Sum("SELECT COALESCE(SUM(Hours),0) FROM Reservation WHERE Status='Booked' AND Date >= TO_CHAR(CURRENT_DATE - INTERVAL '7 days', 'YYYY-MM-DD')");
     var weeklyCapacity = totalSpaces * 7 * 12.0; // 12 bookable hours/day rough estimate
 
     return Results.Ok(new {
@@ -1529,22 +1511,14 @@ app.MapGet("/api/admin/dashboard", (HttpContext http) =>
 app.MapGet("/api/invoices/{reservationId:int}", (HttpContext http, int reservationId) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
-    var name = http.User?.Identity?.Name ?? string.Empty;
     var isAdmin = http.User?.IsInRole("Admin") == true;
+    var ownerId = CurrentUserId(http) ?? 0;
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
-
-    int ownerId;
-    using (var uc = conn.CreateCommand())
-    {
-        uc.CommandText = "SELECT Id FROM Users WHERE Name = $n OR Email = $n LIMIT 1";
-        uc.Parameters.AddWithValue("$n", name);
-        ownerId = Convert.ToInt32(uc.ExecuteScalar() ?? 0);
-    }
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
 
     using var cmd = conn.CreateCommand();
-    cmd.CommandText = "SELECT r.OwnerId, f.PdfPath, f.Num_facture FROM Reservation r LEFT JOIN Facture f ON f.ReservationId = r.ID WHERE r.ID = $id LIMIT 1";
-    cmd.Parameters.AddWithValue("$id", reservationId);
+    cmd.CommandText = "SELECT r.OwnerId, f.PdfPath, f.Num_facture FROM Reservation r LEFT JOIN Facture f ON f.ReservationId = r.ID WHERE r.ID = @id LIMIT 1";
+    cmd.Parameters.AddWithValue("@id", reservationId);
     using var rdr = cmd.ExecuteReader();
     if (!rdr.Read()) return Results.NotFound();
     var resOwner = rdr.GetInt32(0);
@@ -1565,13 +1539,13 @@ app.MapGet("/api/reservations/space", (HttpContext http, int spaceId, string? da
     var d = string.IsNullOrEmpty(date) ? DateTime.UtcNow.ToString("yyyy-MM-dd") : date;
     var list = new List<object>();
 
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
     using var cmd = conn.CreateCommand();
     cmd.CommandText = @"SELECT r.ID, r.Starting_Date, r.Ending_Date, r.Date, r.StartHour, r.Hours, r.Status, r.Total_Amount, r.OwnerId, u.Name as OwnerName
                         FROM Reservation r LEFT JOIN Users u ON r.OwnerId = u.Id
-                        WHERE r.SpaceId = $sp AND r.Date = $d ORDER BY r.StartHour";
-    cmd.Parameters.AddWithValue("$sp", spaceId);
-    cmd.Parameters.AddWithValue("$d", d);
+                        WHERE r.SpaceId = @sp AND r.Date = @d ORDER BY r.StartHour";
+    cmd.Parameters.AddWithValue("@sp", spaceId);
+    cmd.Parameters.AddWithValue("@d", d);
     using var rdr = cmd.ExecuteReader();
     while (rdr.Read())
     {
@@ -1597,7 +1571,7 @@ app.MapGet("/api/reservations/space", (HttpContext http, int spaceId, string? da
 app.MapGet("/api/stats", (HttpContext http) =>
 {
     if (http.User?.Identity?.IsAuthenticated != true) return Results.Unauthorized();
-    using var conn = DbHelpers.OpenConnection(GetDbPath());
+    using var conn = DbHelpers.OpenConnection(GetConnectionString());
 
     int count(string table) { using var c = conn.CreateCommand(); c.CommandText = $"SELECT COUNT(1) FROM {table}"; return Convert.ToInt32(c.ExecuteScalar() ?? 0); }
 
@@ -1615,4 +1589,3 @@ app.MapGet("/login.html", () => Results.Redirect("/Login", false));
 app.MapGet("/index.html", () => Results.Redirect("/", false));
 
 app.Run();
-

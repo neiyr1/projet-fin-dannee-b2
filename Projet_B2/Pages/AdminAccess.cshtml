@@ -31,6 +31,7 @@
 document.getElementById('verify').addEventListener('click', async () => {
   const token = document.getElementById('token').value.trim();
   const result = document.getElementById('result');
+  const esc = s => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   if (!token) return;
   const res = await fetch('/api/access/verify', { method: 'POST', headers: {'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ token }) });
   if (res.status === 401) { location.href = '/Login'; return; }
@@ -38,11 +39,11 @@ document.getElementById('verify').addEventListener('click', async () => {
   const data = await res.json();
   if (data.granted){
     result.innerHTML = `<div class="alert alert-success"><h5 class="mb-2"><i class="bi bi-check-circle me-2"></i>Accès autorisé</h5>
-      <div><strong>${data.owner}</strong> - <strong>${data.space}</strong></div>
+      <div><strong>${esc(data.owner)}</strong> - <strong>${esc(data.space)}</strong></div>
       <div class="small text-muted">${new Date(data.start).toLocaleString()} à ${new Date(data.end).toLocaleString()}</div></div>`;
   } else {
     result.innerHTML = `<div class="alert alert-danger"><h5 class="mb-2"><i class="bi bi-x-circle me-2"></i>Accès refusé</h5>
-      <div class="small">${data.reason || 'Hors créneau de réservation ou réservation annulée.'}</div></div>`;
+      <div class="small">${esc(data.reason) || 'Hors créneau de réservation ou réservation annulée.'}</div></div>`;
   }
 });
 document.getElementById('token').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('verify').click(); });

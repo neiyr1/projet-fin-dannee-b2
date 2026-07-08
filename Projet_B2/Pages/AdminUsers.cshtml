@@ -65,8 +65,8 @@
           </div>
           <div class="mb-3">
             <label class="form-label">Mot de passe initial</label>
-            <input name="password" class="form-control" minlength="6" placeholder="changeme123" />
-            <div class="form-text">Utilisé pour le compte AD si l'Active Directory est activé. Laisser vide pour <code>changeme123</code>.</div>
+            <input name="password" class="form-control" minlength="12" placeholder="Au moins 12 caractères" />
+            <div class="form-text">Utilisé pour le compte AD si l'Active Directory est activé. Laisser vide pour générer un mot de passe aléatoire (affiché une seule fois après création).</div>
           </div>
           <div id="newUserMsg" class="text-danger small"></div>
         </div>
@@ -90,7 +90,7 @@
         </div>
         <div class="modal-body">
           <div class="mb-2 small text-muted">Utilisateur <strong id="resetPwdLabel"></strong></div>
-          <input name="password" type="text" class="form-control" minlength="6" required placeholder="Nouveau mot de passe" />
+          <input name="password" type="text" class="form-control" minlength="12" required placeholder="Nouveau mot de passe (12 caractères min.)" />
           <input type="hidden" name="id" />
           <div id="resetPwdMsg" class="text-danger small mt-2"></div>
         </div>
@@ -123,7 +123,7 @@
       const verifiedCell = u.emailVerified
         ? `<span class="badge status-soft-success"><i class="bi bi-check-circle me-1"></i>Vérifié</span>`
         : `<span class="badge status-pending"><i class="bi bi-clock-history me-1"></i>En attente</span>
-           <button class="btn btn-sm btn-outline-success ms-1 verify-btn" data-id="${u.id}" title="Marquer comme verifie"><i class="bi bi-check2"></i></button>`;
+           <button class="btn btn-sm btn-outline-success ms-1 verify-btn" data-id="${u.id}" title="Marquer comme verifie" aria-label="Marquer comme vérifié"><i class="bi bi-check2"></i></button>`;
       const adCell = u.adSamAccountName
         ? `<span class="badge bg-primary-subtle text-primary border">AD</span><div class="small text-muted">${esc(u.adSamAccountName)}</div><div class="small text-muted">${esc(u.adUserPrincipalName)}</div>`
         : `<span class="badge bg-light text-dark border">Local</span>`;
@@ -134,10 +134,10 @@
       if (!isActive) tr.classList.add('table-secondary');
       tr.innerHTML = `
         <td class="text-muted">#${u.id}</td>
-        <td><input class="form-control form-control-sm inline-edit" data-id="${u.id}" data-field="name" value="${esc(u.name)}" /></td>
-        <td><input class="form-control form-control-sm inline-edit" data-id="${u.id}" data-field="email" type="email" value="${esc(u.email)}" /></td>
+        <td><input class="form-control form-control-sm inline-edit" data-id="${u.id}" data-field="name" value="${esc(u.name)}" aria-label="Nom de l'utilisateur #${u.id}" /></td>
+        <td><input class="form-control form-control-sm inline-edit" data-id="${u.id}" data-field="email" type="email" value="${esc(u.email)}" aria-label="Email de l'utilisateur #${u.id}" /></td>
         <td>
-          <select class="form-select form-select-sm role-select" data-id="${u.id}" style="width:auto;display:inline-block">
+          <select class="form-select form-select-sm role-select" data-id="${u.id}" style="width:auto;display:inline-block" aria-label="Rôle de l'utilisateur #${u.id}">
             ${[
               ['User','Utilisateur'],
               ['Member','Membre'],
@@ -153,9 +153,9 @@
         <td>${verifiedCell}</td>
         <td><span class="badge bg-light text-dark border">${u.bookings}</span></td>
         <td class="text-end pe-3 text-nowrap table-actions">
-          <button class="btn btn-sm ${isActive ? 'btn-outline-secondary' : 'btn-outline-success'} status-btn" data-id="${u.id}" data-enabled="${isActive ? 'false' : 'true'}" data-label="${esc(u.name || u.email)}" title="${isActive ? 'Desactiver le compte' : 'Reactiver le compte'}"><i class="bi ${isActive ? 'bi-person-slash' : 'bi-person-check'}"></i></button>
-          <button class="btn btn-sm btn-outline-warning reset-btn" data-id="${u.id}" data-label="${esc(u.name || u.email)}" title="Réinitialiser le mot de passe"><i class="bi bi-key"></i></button>
-          <button class="btn btn-sm btn-outline-danger del-btn" data-id="${u.id}" data-label="${esc(u.name || u.email)}" title="Supprimer l'utilisateur"><i class="bi bi-trash"></i></button>
+          <button class="btn btn-sm ${isActive ? 'btn-outline-secondary' : 'btn-outline-success'} status-btn" data-id="${u.id}" data-enabled="${isActive ? 'false' : 'true'}" data-label="${esc(u.name || u.email)}" title="${isActive ? 'Desactiver le compte' : 'Reactiver le compte'}" aria-label="${isActive ? 'Désactiver' : 'Réactiver'} le compte de ${esc(u.name || u.email)}"><i class="bi ${isActive ? 'bi-person-slash' : 'bi-person-check'}"></i></button>
+          <button class="btn btn-sm btn-outline-warning reset-btn" data-id="${u.id}" data-label="${esc(u.name || u.email)}" title="Réinitialiser le mot de passe" aria-label="Réinitialiser le mot de passe de ${esc(u.name || u.email)}"><i class="bi bi-key"></i></button>
+          <button class="btn btn-sm btn-outline-danger del-btn" data-id="${u.id}" data-label="${esc(u.name || u.email)}" title="Supprimer l'utilisateur" aria-label="Supprimer l'utilisateur ${esc(u.name || u.email)}"><i class="bi bi-trash"></i></button>
         </td>`;
       tbody.appendChild(tr);
     }
@@ -276,8 +276,12 @@
     const res = await fetch('/api/users', { method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify(payload) });
     const msg = document.getElementById('newUserMsg');
     if (res.ok) {
+      const created = await res.json().catch(()=>null);
       e.target.reset();
       bootstrap.Modal.getInstance(document.getElementById('newUserModal'))?.hide();
+      if (created?.generatedPassword) {
+        alert(`Utilisateur créé. Mot de passe généré (à communiquer une seule fois) : ${created.generatedPassword}`);
+      }
       load();
     } else {
       const j = await res.json().catch(()=>null);

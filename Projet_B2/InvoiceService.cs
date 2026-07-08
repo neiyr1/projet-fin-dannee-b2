@@ -1,5 +1,5 @@
 using System.Globalization;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
@@ -40,13 +40,13 @@ public class InvoiceData
 // FONCTIONNALITE: creation et stockage des factures PDF associees aux reservations.
 public class InvoiceService
 {
-    readonly string _dbPath;
+    readonly string _connectionString;
     readonly string _invoicesDir;
     readonly IConfiguration _config;
 
-    public InvoiceService(string dbPath, string invoicesDir, IConfiguration config)
+    public InvoiceService(string connectionString, string invoicesDir, IConfiguration config)
     {
-        _dbPath = dbPath;
+        _connectionString = connectionString;
         _invoicesDir = invoicesDir;
         _config = config;
         Directory.CreateDirectory(_invoicesDir);
@@ -58,11 +58,11 @@ public class InvoiceService
     public InvoiceData? BuildForReservations(IList<int> reservationIds)
     {
         if (reservationIds.Count == 0) return null;
-        using var conn = DbHelpers.OpenConnection(_dbPath);
+        using var conn = DbHelpers.OpenConnection(_connectionString);
 
         var lines = new List<InvoiceLine>();
         string ownerName = "", ownerEmail = "";
-        var inClause = string.Join(",", reservationIds.Select((_, i) => $"$p{i}"));
+        var inClause = string.Join(",", reservationIds.Select((_, i) => $"@p{i}"));
         using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = $@"SELECT r.ID, r.Hours, r.StartHour, r.Date, r.AccessToken,
@@ -74,7 +74,7 @@ public class InvoiceService
                                  WHERE r.ID IN ({inClause})
                                  ORDER BY r.Date, r.StartHour";
             for (int i = 0; i < reservationIds.Count; i++)
-                cmd.Parameters.AddWithValue($"$p{i}", reservationIds[i]);
+                cmd.Parameters.AddWithValue($"@p{i}", reservationIds[i]);
             using var rdr = cmd.ExecuteReader();
             while (rdr.Read())
             {
@@ -263,27 +263,27 @@ public class InvoiceService
 
     public int SaveFactureRow(InvoiceData data, string pdfPath)
     {
-        using var conn = DbHelpers.OpenConnection(_dbPath);
+        using var conn = DbHelpers.OpenConnection(_connectionString);
 
         using (var del = conn.CreateCommand())
         {
-            del.CommandText = "DELETE FROM Facture WHERE ReservationId = $rid";
-            del.Parameters.AddWithValue("$rid", data.ReservationId);
+            del.CommandText = "DELETE FROM Facture WHERE ReservationId = @rid";
+            del.Parameters.AddWithValue("@rid", data.ReservationId);
             del.ExecuteNonQuery();
         }
 
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"INSERT INTO Facture (Num_facture, date_facture, Amount_HT, Amount_TVA, Amount_TTC, Payment_Status, ReservationId, PdfPath)
-                            VALUES ($num, $date, $ht, $tva, $ttc, $status, $rid, $path);
-                            SELECT last_insert_rowid();";
-        cmd.Parameters.AddWithValue("$num", data.Number);
-        cmd.Parameters.AddWithValue("$date", data.Date.ToString("o"));
-        cmd.Parameters.AddWithValue("$ht", data.AmountHT);
-        cmd.Parameters.AddWithValue("$tva", data.AmountTVA);
-        cmd.Parameters.AddWithValue("$ttc", data.AmountTTC);
-        cmd.Parameters.AddWithValue("$status", "Pending");
-        cmd.Parameters.AddWithValue("$rid", data.ReservationId);
-        cmd.Parameters.AddWithValue("$path", pdfPath);
+                            VALUES (@num, @date, @ht, @tva, @ttc, @status, @rid, @path)
+                            RETURNING ID;";
+        cmd.Parameters.AddWithValue("@num", data.Number);
+        cmd.Parameters.AddWithValue("@date", data.Date.ToString("o"));
+        cmd.Parameters.AddWithValue("@ht", data.AmountHT);
+        cmd.Parameters.AddWithValue("@tva", data.AmountTVA);
+        cmd.Parameters.AddWithValue("@ttc", data.AmountTTC);
+        cmd.Parameters.AddWithValue("@status", "Pending");
+        cmd.Parameters.AddWithValue("@rid", data.ReservationId);
+        cmd.Parameters.AddWithValue("@path", pdfPath);
         return Convert.ToInt32(cmd.ExecuteScalar() ?? 0);
     }
 }

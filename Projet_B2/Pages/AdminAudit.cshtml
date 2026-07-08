@@ -26,11 +26,12 @@
 <script>
 (async function(){
   const body = document.getElementById('body');
+  const esc = s => (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function actionBadge(a){
     const map = { BookingCreate: 'bg-success', BookingCancel: 'bg-secondary', BookingModify: 'bg-warning text-dark',
                   AccessGranted: 'bg-success', AccessDenied: 'bg-danger', ReminderSent: 'bg-info text-dark',
                   CartCheckout: 'bg-primary', BackupDownload: 'bg-dark' };
-      return `<span class="badge ${map[a] || 'bg-light text-dark border'}">${a || '-'}</span>`;
+      return `<span class="badge ${map[a] || 'bg-light text-dark border'}">${esc(a) || '-'}</span>`;
   }
   async function load(){
     const res = await fetch('/api/admin/audit', { credentials: 'include' });
@@ -42,10 +43,10 @@
     for (const i of items){
       const tr = document.createElement('tr');
       tr.innerHTML = `<td class="text-muted small">${i.timestamp ? new Date(i.timestamp).toLocaleString() : ''}</td>
-          <td>${i.user || '<span class="text-muted">-</span>'}</td>
+          <td>${i.user ? esc(i.user) : '<span class="text-muted">-</span>'}</td>
         <td>${actionBadge(i.action)}</td>
-        <td><code>${i.target || ''}</code></td>
-        <td class="small text-muted">${i.details || ''}</td>`;
+        <td><code>${esc(i.target)}</code></td>
+        <td class="small text-muted">${esc(i.details)}</td>`;
       body.appendChild(tr);
     }
   }

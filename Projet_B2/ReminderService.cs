@@ -1,13 +1,13 @@
 // FONCTIONNALITE: tache de fond pour retrouver les reservations proches et declencher les rappels.
 public class ReminderService : BackgroundService
 {
-    readonly string _dbPath;
+    readonly string _connectionString;
     readonly EmailService _email;
     readonly ILogger<ReminderService> _logger;
 
-    public ReminderService(string dbPath, EmailService email, ILogger<ReminderService> logger)
+    public ReminderService(string connectionString, EmailService email, ILogger<ReminderService> logger)
     {
-        _dbPath = dbPath;
+        _connectionString = connectionString;
         _email = email;
         _logger = logger;
     }
@@ -30,7 +30,7 @@ public class ReminderService : BackgroundService
         var windowStart = now.AddMinutes(55);
         var windowEnd = now.AddMinutes(65);
 
-        using var conn = DbHelpers.OpenConnection(_dbPath);
+        using var conn = DbHelpers.OpenConnection(_connectionString);
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT r.ID, r.Date, r.StartHour, r.Hours, u.Email, u.Name, s.Name
                             FROM Reservation r
@@ -64,11 +64,11 @@ public class ReminderService : BackgroundService
             {
                 await _email.SendReminderAsync(d.email, d.name, d.space, d.start, d.hours);
                 using var mark = conn.CreateCommand();
-                mark.CommandText = "INSERT INTO Reminders (ReservationId, SentAt) VALUES ($id, $ts)";
-                mark.Parameters.AddWithValue("$id", d.id);
-                mark.Parameters.AddWithValue("$ts", DateTime.UtcNow.ToString("o"));
+                mark.CommandText = "INSERT INTO Reminders (ReservationId, SentAt) VALUES (@id, @ts)";
+                mark.Parameters.AddWithValue("@id", d.id);
+                mark.Parameters.AddWithValue("@ts", DateTime.UtcNow.ToString("o"));
                 mark.ExecuteNonQuery();
-                DbHelpers.WriteAudit(_dbPath, "system", "ReminderSent", $"Reservation#{d.id}");
+                DbHelpers.WriteAudit(_connectionString, "system", "ReminderSent", $"Reservation#{d.id}");
                 _logger.LogInformation("Sent H-1 reminder for reservation {Id} to {Email}", d.id, d.email);
             }
             catch (Exception ex)
